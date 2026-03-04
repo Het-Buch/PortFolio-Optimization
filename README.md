@@ -227,7 +227,10 @@ GROQ_API_KEY=your_groq_api_key_here
 
 Create a `.env` file inside the `database/` folder (if needed for any additional secrets):
 ```env
-# Add any additional keys here
+API_KEY=your_firebase_project_api_key_here
+databaseURL=your_firebase_db_url
+manager_email=manager_email
+manager_password=manager_password
 ```
 
 ### Step 5 — Add Firebase Credentials
