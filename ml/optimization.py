@@ -6,8 +6,8 @@ from ml.train import train_models
 from ml.news import filter_data
 from ml.visualization import create_portfolio_charts
 from ml.agentic import analyze_portfolio
-from ml.market_agents import analyze_portfolio_with_market_data
 from services.cache import cached_prediction
+from services.stock_services import fetch_stock_data
 import time
 
 # from train import train_models
@@ -102,12 +102,25 @@ def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, u
             print(f"Predicted price: {predicted_price}")
 
         else:
-            print(f"Skipping {company['company']} - prediction failed")
+            fallback_quote = fetch_stock_data(ticker)
+            fallback_price = float((fallback_quote or {}).get(ticker, (fallback_quote or {}).get("price", 0)) or 0)
+
+            if fallback_price > 0:
+                returns_data.append(fallback_price)
+                valid_companies.append(company)
+                print(f"Using fallback live price: {fallback_price}")
+            else:
+                print(f"Skipping {company['company']} - prediction failed")
 
         news_data = filter_data(company['company'])
         sentiment_scores.append(news_data.get("sentiment", 0))
     companies = valid_companies
     n_assets = len(companies)
+
+    if n_assets == 0:
+        print("No valid companies available for optimization.")
+        return None, None
+
     # Convert to numpy arrays
     returns = np.array(returns_data, dtype=float)
     sentiments = np.array(sentiment_scores[:n_assets], dtype=float)
@@ -169,13 +182,22 @@ def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, u
     
     # Get market-aware analysis if requested
     if use_market_agents:
-        print("\nGenerating market-aware analysis with specialized agents...")
-        market_analysis = analyze_portfolio_with_market_data(
-            portfolio_data, 
-            optimized_weights, 
-            initial_weights
-        )
-        optimized_weights['market_analysis'] = market_analysis
+        try:
+            from ml.market_agents import analyze_portfolio_with_market_data
+
+            print("\nGenerating market-aware analysis with specialized agents...")
+            market_analysis = analyze_portfolio_with_market_data(
+                portfolio_data,
+                optimized_weights,
+                initial_weights
+            )
+            optimized_weights['market_analysis'] = market_analysis
+        except Exception as e:
+            print(f"Skipping market-agent analysis: {e}")
+            optimized_weights['market_analysis'] = {
+                "status": "skipped",
+                "reason": str(e)
+            }
     
     return optimized_weights,fig
 

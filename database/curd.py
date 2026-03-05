@@ -80,6 +80,61 @@ def generate_purchase_id():
     except Exception as e:
         print(f"Error generating purchase ID: {e}")
         return None
+
+
+def generate_transaction_id():
+    try:
+        ref = db.reference("transactions")
+
+        if not ref.get():
+            ref.set({})
+
+        transactions = ref.get()
+
+        if transactions:
+            last_transaction_id = max(transactions.keys())
+            last_number = int(last_transaction_id[3:])
+        else:
+            last_number = 0
+
+        new_number = last_number + 1
+        year_suffix = datetime.now().year % 100
+        transaction_id = f"{year_suffix}t{new_number:07d}"
+
+        return transaction_id
+    except Exception as e:
+        print(f"Error generating transaction ID: {e}")
+        return None
+
+
+def add_transaction_to_db(user_id, purchased_id, company_name, ticker, quantity, price_per_stock, action, mode):
+    try:
+        ref = db.reference("transactions")
+        transaction_id = generate_transaction_id()
+
+        if not transaction_id:
+            return False
+
+        total_value = round(float(quantity) * float(price_per_stock), 2)
+
+        ref.child(transaction_id).set({
+            "transaction_id": transaction_id,
+            "user_id": user_id,
+            "purchase_id": purchased_id,
+            "company_name": company_name,
+            "ticker": ticker,
+            "quantity": int(quantity),
+            "price_per_stock": float(price_per_stock),
+            "total_value": total_value,
+            "action": action,
+            "mode": mode,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        return True
+    except Exception as e:
+        print(f"Error adding transaction: {e}")
+        return False
     
 def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_cost,stock_id,ticker):
     try:
@@ -105,7 +160,20 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
             "ticker": ticker,
             "stock_id":stock_id,
             "sold_at":0.0,
+            "target_price": 0.0,
+            "target_set": False,
         })
+
+        add_transaction_to_db(
+            user_id=user_id,
+            purchased_id=purchase_id,
+            company_name=company_name,
+            ticker=ticker,
+            quantity=quantity,
+            price_per_stock=price_per_stock,
+            action="BUY",
+            mode="manual"
+        )
 
         return True
     except Exception as e:
@@ -120,28 +188,30 @@ def get_purchased_stocks(user_id):
         for purchase_id, purchase in all_purchases.items():
             if purchase.get("user_id") != user_id or purchase.get("sold"):
                 continue
-            stock_id = purchase.get("stock_id")
-            if stock_id not in portfolio:
-                portfolio[stock_id] = {
-                    "company_name": purchase.get("company_name"),
-                    "ticker": purchase.get("ticker"),
-                    "quantity": 0,
-                    "total_cost": 0
-                }
-            portfolio[stock_id]["quantity"] += purchase.get("quantity", 0)
-            portfolio[stock_id]["total_cost"] += purchase.get("total_cost", 0)
+            portfolio[purchase_id] = {
+                "purchase_id": purchase_id,
+                "stock_id": purchase.get("stock_id"),
+                "company_name": purchase.get("company_name"),
+                "ticker": purchase.get("ticker"),
+                "quantity": purchase.get("quantity", 0),
+                "price_per_stock": purchase.get("price_per_stock", 0),
+                "total_cost": purchase.get("total_cost", 0),
+                "target_price": float(purchase.get("target_price", 0) or 0),
+                "target_set": bool(purchase.get("target_set", False)),
+                "sold": bool(purchase.get("sold", False)),
+            }
         return portfolio
     except Exception as e:
         print(f"Error fetching user purchases: {e}")
         return {}
     
-def get_stock_data(stock_id):
+def get_stock_data(purchased_id):
     try:
         # Reference to the database path
         ref = db.reference("purchases")
 
-        # Fetch stock data for the given stock_id
-        stock_data = ref.child(stock_id).get()
+        # Fetch stock data for the given purchase id
+        stock_data = ref.child(purchased_id).get()
 
         return stock_data if stock_data else {}
     except Exception as e:
@@ -171,18 +241,38 @@ def update_stock_data(purchased_id, price_per_stock, quantity, user_id):
         print(f"Error updating stock data: {e}")
         return False
     
-def sell_stock(purchased_id, user_id,current_price):
+def sell_stock(purchased_id, user_id, current_price, mode="manual"):
     try:
         # Reference to the database path
         ref = db.reference("purchases")
 
+        stock_data = ref.child(purchased_id).get()
+        if not stock_data or stock_data.get("sold", False):
+            return False
+
+        quantity = int(stock_data.get("quantity", 0) or 0)
+        company_name = stock_data.get("company_name", "")
+        ticker = stock_data.get("ticker", "")
+
         # Update stock data for the given stock_id to mark it as sold
         ref.child(purchased_id).update({
             "sold": True,
-            "sold_at":current_price,
+            "sold_at": current_price,
+            "target_set": False,
             "updated_by": user_id,
             "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
+
+        add_transaction_to_db(
+            user_id=user_id,
+            purchased_id=purchased_id,
+            company_name=company_name,
+            ticker=ticker,
+            quantity=quantity,
+            price_per_stock=current_price,
+            action="SELL",
+            mode=mode
+        )
 
         return True
     except Exception as e:
@@ -199,6 +289,61 @@ def get_live_price_from_db(ticker):
     except Exception as e:
         print(f"Error fetching live price: {e}")
         return 0.0
+
+
+def set_target_price(purchased_id, target_price, user_id):
+    try:
+        if target_price <= 0:
+            print("Target price must be greater than 0.")
+            return False
+
+        ref = db.reference("purchases")
+        stock_data = ref.child(purchased_id).get()
+
+        if not stock_data or stock_data.get("sold", False):
+            return False
+
+        ref.child(purchased_id).update({
+            "target_price": float(target_price),
+            "target_set": True,
+            "updated_by": user_id,
+            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        return True
+    except Exception as e:
+        print(f"Error setting target price: {e}")
+        return False
+
+
+def get_user_transactions(user_id):
+    try:
+        ref = db.reference("transactions")
+        all_transactions = ref.get() or {}
+
+        records = []
+        for _, txn in all_transactions.items():
+            if txn.get("user_id") != user_id:
+                continue
+
+            records.append({
+                "timestamp": txn.get("timestamp", ""),
+                "action": txn.get("action", ""),
+                "mode": txn.get("mode", ""),
+                "company_name": txn.get("company_name", ""),
+                "ticker": txn.get("ticker", ""),
+                "quantity": int(txn.get("quantity", 0) or 0),
+                "price_per_stock": float(txn.get("price_per_stock", 0) or 0),
+                "total_value": float(txn.get("total_value", 0) or 0),
+                "transaction_id": txn.get("transaction_id", ""),
+                "purchase_id": txn.get("purchase_id", ""),
+            })
+
+        records.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        return records
+    except Exception as e:
+        print(f"Error fetching transaction history: {e}")
+        return []
 
 
 if __name__ == "__main__":

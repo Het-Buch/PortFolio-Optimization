@@ -17,3 +17,4 @@ langchain-core
 streamlit
 firebase-admin
 matplotlib
+langchain-groq
