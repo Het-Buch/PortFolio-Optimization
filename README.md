@@ -1,7 +1,7 @@
 # 📈 Agentic AI for Smart Portfolio Management
 ### *A Fusion of ML and Nature-Inspired Algorithms*
 
-> An intelligent, end-to-end portfolio optimization system that combines **machine learning**, **nature-inspired metaheuristic algorithms**, and **Agentic AI** to deliver real-time, personalized investment recommendations — built by Heli Hathi & Het Buch. The system fetches 15 years of historical stock data from Yahoo Finance (Nifty50 & Sensex), engineers 25 technical indicators via TA-Lib, trains and compares 25 ML regression models using PyCaret, optimizes portfolio weights using PSO, GWO, and Bat Algorithm, analyses market sentiment from financial news, and uses two LangChain + Groq-powered autonomous agents — a Market Research Agent and a Portfolio Optimization Agent — to generate detailed, explainable rebalancing reports; all of this is wrapped in a Streamlit + Flask web-app with Firebase backend for secure user authentication, portfolio storage, and a manager dashboard.
+> An intelligent, end-to-end portfolio optimization system that combines **machine learning**, **nature-inspired metaheuristic algorithms**, and **Agentic AI** to deliver real-time, personalized investment recommendations. The system fetches 15 years of historical stock data from Yahoo Finance (Nifty50 & Sensex), engineers 25 technical indicators via TA-Lib, trains and compares 25 ML regression models using PyCaret, optimizes portfolio weights using PSO, GWO, and Bat Algorithm, analyses market sentiment from financial news, and uses two LangChain + Groq-powered autonomous agents — a Market Research Agent and a Portfolio Optimization Agent — to generate detailed, explainable rebalancing reports; all of this is wrapped in a Streamlit + Flask web-app with Firebase backend for secure user authentication, portfolio storage, and a manager dashboard.
 
 ---
 
@@ -227,7 +227,10 @@ GROQ_API_KEY=your_groq_api_key_here
 
 Create a `.env` file inside the `database/` folder (if needed for any additional secrets):
 ```env
-# Add any additional keys here
+API_KEY=your_firebase_project_api_key_here
+databaseURL=your_firebase_db_url
+manager_email=manager_email
+manager_password=manager_password
 ```
 
 ### Step 5 — Add Firebase Credentials
@@ -326,18 +329,6 @@ The app will open at **http://localhost:8501**
 | 👤 **New User** | Click "Register" on the landing page |
 | 🔑 **Existing User** | Click "Login" with your credentials |
 | 🛠️ **Manager** | Click "Manager" and use manager credentials |
-
----
-
-## 👥 Team
-
-| Name | Enrollment No. | Contributions |
-|---|---|---|
-| **Heli Hathi** | 92100103341 | Conceptualization, diagrams, database design, optimization algorithms, Agentic AI & sentiment analysis, backend |
-| **Het Buch** | 92100103196 | Literature review, methodology, wireframes, frontend web-app, backend |
-
-**Guide:** Prof. Ravikumar R. Natarajan, Assistant Professor, Dept. of Computer Engineering  
-**Institution:** Marwadi University, Rajkot — Faculty of Technology (2024–25)
 
 ---
 
