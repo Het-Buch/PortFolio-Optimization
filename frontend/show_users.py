@@ -36,7 +36,7 @@ def show_users():
 
     st.dataframe(
         df,
-        use_container_width=True
+        width='stretch'
     )
 
     st.divider()

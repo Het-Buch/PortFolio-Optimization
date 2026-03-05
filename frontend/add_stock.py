@@ -17,7 +17,7 @@ def add_stock():
         st.session_state.valid_stock = False
 
 
-    stock_ticker = st.text_input("Stock Symbol").upper()
+    stock_ticker = st.text_input("Stock Symbol").strip().upper()
 
     if st.button("Fetch Stock Info"):
         if not stock_ticker:
@@ -26,19 +26,24 @@ def add_stock():
             st.warning("Enter a valid stock ticker")
         else:
             data = fetch_stock_data(stock_ticker)
-            if data and "price" in data:
+            if data and "name" in data:
                 name = data.get("name", stock_ticker.upper())
-                price = round(float(data["price"]), 2)
+                price = round(float(data.get("price", 0) or 0), 2)
 
                 st.session_state.stock_name = name
                 st.session_state.stock_price = price
                 st.session_state.valid_stock = True
 
-                st.success(f"{name} | Live Price: ₹{price}")
+                if price > 0:
+                    st.success(f"{name} | Live Price: ₹{price}")
+                else:
+                    st.warning("Live price unavailable right now. You can still add this stock and price will load later.")
 
             else:
-                st.session_state.valid_stock = False
-                st.warning("Unable to fetch stock. Yahoo may be rate limiting.")
+                st.session_state.stock_name = stock_ticker
+                st.session_state.stock_price = 0.0
+                st.session_state.valid_stock = True
+                st.warning("Live price unavailable right now. You can still add this stock and price will load later.")
 
     # Locked fields
     st.text_input(
@@ -63,7 +68,8 @@ def add_stock():
 
             if add_stock_to_db(
                 st.session_state.stock_name,
-                stock_ticker
+                stock_ticker,
+                st.session_state.stock_price
             ):
                 st.toast("Stock added successfully")
                 # Clear cached values

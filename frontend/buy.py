@@ -14,6 +14,10 @@ def buy():
 
     st.title("Buy Stocks")
 
+    if st.button("Back to Home"):
+        st.session_state["page"] = "home"
+        st.rerun()
+
     stock_data = cached_stocks()
 
     if not stock_data:
@@ -51,15 +55,22 @@ def buy():
         st.error("Stock not found.")
         return
 
-    ticker = selected_stock["ticker"]
+    ticker = str(selected_stock["ticker"]).strip().upper()
     stock_id = selected_stock["stock_id"]
     # fetch live price
     data = fetch_stock_data([ticker])
-    if not data:
+    ticker_ns = ticker if ticker.endswith(".NS") else ticker + ".NS"
+    live_price = round((data or {}).get(ticker_ns, (data or {}).get("price", 0)) or 0, 2)
+    fallback_price = round(float(selected_stock.get("price", 0) or 0), 2)
+    price = live_price or fallback_price
+
+    if price == 0:
         st.error("Unable to fetch live stock price.")
         return
-    ticker_ns = ticker if ticker.endswith(".NS") else ticker + ".NS"
-    price = round(data.get(ticker_ns, 0) or 0, 2)
+
+    if live_price == 0 and fallback_price > 0:
+        st.warning(f"Live price unavailable. Using last saved price: ₹{fallback_price}")
+
     st.info(f"Live Price per stock: ₹{price}")
     
     col1, col2 = st.columns(2)

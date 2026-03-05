@@ -34,7 +34,7 @@ def show_stocks():
 
     st.dataframe(
         df.drop(columns=["ID"]),
-        use_container_width=True,
+        width='stretch',
     )
 
     st.divider()

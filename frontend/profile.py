@@ -1,5 +1,7 @@
 import streamlit as st
+import pandas as pd
 from database.curd import get_user_details
+from services.cache import cached_transactions
 
 
 @st.cache_data(ttl=10)
@@ -53,3 +55,28 @@ def profile():
 
     with col2:
         st.write(f"**Phone:** {user_details.get('phone')}")
+
+    st.divider()
+    st.subheader("Transaction History")
+
+    transactions = cached_transactions(user_id)
+
+    if not transactions:
+        st.info("No transactions found yet.")
+        return
+
+    history_df = pd.DataFrame([
+        {
+            "Date": t.get("timestamp", ""),
+            "Type": t.get("action", ""),
+            "Mode": t.get("mode", ""),
+            "Company": t.get("company_name", ""),
+            "Ticker": t.get("ticker", ""),
+            "Quantity": t.get("quantity", 0),
+            "Price": round(float(t.get("price_per_stock", 0) or 0), 2),
+            "Total": round(float(t.get("total_value", 0) or 0), 2),
+        }
+        for t in transactions
+    ])
+
+    st.dataframe(history_df, width='stretch')

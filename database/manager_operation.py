@@ -55,7 +55,7 @@ def stock_exists(stock_ticker):
         print(f"Error checking stock: {e}")
         return False
 
-def add_stock_to_db(stock_name, stock_ticker):
+def add_stock_to_db(stock_name, stock_ticker, stock_price=0.0):
     try:
 
         # Check if stock already exists
@@ -70,6 +70,7 @@ def add_stock_to_db(stock_name, stock_ticker):
         stocks_ref.child(stock_id).set({
             "name": stock_name,
             "ticker": stock_ticker,
+            "price": float(stock_price or 0),
             "stock_id": stock_id,
             "is_deleted": False,
             "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

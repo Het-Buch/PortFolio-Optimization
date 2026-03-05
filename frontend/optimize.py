@@ -180,6 +180,10 @@ def optimize():
 
     st.title("Portfolio Optimization")
 
+    if st.button("Back to Home"):
+        st.session_state["page"] = "home"
+        st.rerun()
+
     user_id = st.session_state["user"]
 
     purchased_stocks = cached_portfolio(user_id)
@@ -197,15 +201,32 @@ def optimize():
         return
 
     # Portfolio display
-    df = pd.DataFrame([
-        {
+    table_rows = []
+    for s in active_stocks:
+        quantity = int(s.get("quantity", 0) or 0)
+        total_cost = float(s.get("total_cost", 0) or 0)
+
+        ticker = str(s.get("ticker", "")).strip().upper()
+        ticker_ns = ticker if ticker.endswith(".NS") else (ticker + ".NS" if ticker else "")
+
+        live_price = 0.0
+        if ticker_ns:
+            quote = fetch_stock_data(ticker_ns)
+            if quote:
+                live_price = float(quote.get(ticker_ns, quote.get("price", 0)) or 0)
+
+        stored_price = float(s.get("price_per_stock", 0) or 0)
+        derived_price = (total_cost / quantity) if quantity > 0 else 0
+        display_price = round(live_price or stored_price or derived_price, 2)
+
+        table_rows.append({
             "Company": s["company_name"],
-            "Quantity": s["quantity"],
-            "Price": round(s.get("price_per_stock", 0), 2),
-            "Total Cost": round(s["total_cost"], 2),
-        }
-        for s in active_stocks
-    ])
+            "Quantity": quantity,
+            "Price": display_price,
+            "Total Cost": round(total_cost, 2),
+        })
+
+    df = pd.DataFrame(table_rows)
 
     df.index = df.index + 1
 
