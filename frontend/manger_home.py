@@ -32,6 +32,10 @@ def manager_home():
         st.session_state["page"] = "show_users"
         st.rerun()
 
+    if st.sidebar.button("Show Stock Sectors"):
+        st.session_state["page"] = "sector_manager"
+        st.rerun()
+
     if st.sidebar.button("Logout"):
         del st.session_state["user"]
         st.session_state["page"] = "landing"

@@ -11,12 +11,13 @@ from datetime import datetime, timedelta
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Calculate dynamic date range
-today = datetime.today().date()
-end_date = today - timedelta(days=1)  # Yesterday
-start_date = today - timedelta(days=15 * 365)  # Approximately 15 years ago
-start_date_str = start_date.strftime("%Y-%m-%d")
-end_date_str = end_date.strftime("%Y-%m-%d")
+def _build_date_range(years_back=15):
+    """Build a fresh date window for each request so long-running apps do not go stale."""
+    today = datetime.today().date()
+    start_date = today - timedelta(days=years_back * 365)
+    # yfinance treats end as exclusive; +1 day includes the latest available session.
+    end_date = today + timedelta(days=1)
+    return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
 
 # Feature Engineering Functions
 def add_technical_indicators(data):
@@ -74,9 +75,18 @@ def preprocess_data(data):
     data.dropna(inplace=True)
     return data
 
-def get_stock_data(ticker, start_date=start_date_str, end_date=end_date_str):
+def get_stock_data(ticker, start_date=None, end_date=None):
     """Fetch stock data from Yahoo Finance."""
-    data = yf.download(ticker, start=start_date, end=end_date)
+    if start_date is None or end_date is None:
+        start_date, end_date = _build_date_range()
+
+    data = yf.download(
+        ticker,
+        start=start_date,
+        end=end_date,
+        auto_adjust=False,
+        progress=False
+    )
     if data.empty:
         logging.warning(f"Data not available for ticker: {ticker}")
         return None
@@ -109,13 +119,15 @@ def train_models(ticker, company_name):
         copy_X=True,
         max_iter=None,
         positive=False,
-        solver='auto',
+        # SVD is more stable for near-singular/ill-conditioned design matrices.
+        solver='svd',
         tol=0.0001
     )
     ridge_model.fit(X_train, y_train)
     
     # Predict today's price
-    predicted_price = ridge_model.predict(X_test)[0]
+    predicted_price = float(ridge_model.predict(X_test)[0])
+    predicted_price = max(predicted_price, 0.0)
     
     return {
         "Company Name": company_name,

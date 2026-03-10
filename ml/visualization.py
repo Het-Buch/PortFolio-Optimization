@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+def _display_name(value):
+    return str(value or "").replace(".NS", "").strip()
+
 def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True):
     """
     Create pie charts comparing before and after portfolio weights.
@@ -13,27 +17,37 @@ def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True)
     if not show_charts:
         return
     
-    # Calculate initial weights based on number of stocks owned
-    total_stocks = sum(company['stocks_owned'] for company in portfolio_data['portfolio'])
-    initial_weights = {
-        company['company']: company['stocks_owned'] / total_stocks
-        for company in portfolio_data['portfolio']
-    }
+    # Calculate initial weights based on portfolio value (fallback to quantity).
+    total_value = sum(float(company.get('position_value', 0) or 0) for company in portfolio_data['portfolio'])
+    if total_value > 0:
+        initial_weights = {
+            company['company']: float(company.get('position_value', 0) or 0) / total_value
+            for company in portfolio_data['portfolio']
+        }
+    else:
+        total_stocks = sum(company['stocks_owned'] for company in portfolio_data['portfolio'])
+        if total_stocks <= 0:
+            return None
+        initial_weights = {
+            company['company']: company['stocks_owned'] / total_stocks
+            for company in portfolio_data['portfolio']
+        }
     
     # Prepare data for plotting
     companies = list(initial_weights.keys())
+    display_companies = [_display_name(c) for c in companies]
     initial_values = list(initial_weights.values())
-    optimized_values = [optimized_weights['portfolio_weights'][company] for company in companies]
+    optimized_values = [float(optimized_weights['portfolio_weights'].get(company, 0) or 0) for company in companies]
     
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
     
     # Plot initial portfolio
-    ax1.pie(initial_values, labels=companies, autopct='%1.1f%%', startangle=90)
-    ax1.set_title('Initial Portfolio Weights\n(Based on Number of Stocks)')
+    ax1.pie(initial_values, labels=display_companies, autopct='%1.1f%%', startangle=90)
+    ax1.set_title('Initial Portfolio Weights\n(Based on Portfolio Value)')
     
     # Plot optimized portfolio
-    ax2.pie(optimized_values, labels=companies, autopct='%1.1f%%', startangle=90)
+    ax2.pie(optimized_values, labels=display_companies, autopct='%1.1f%%', startangle=90)
     ax2.set_title('Optimized Portfolio Weights\n(Based on ML Model)')
     
     # Add portfolio metrics as text
@@ -51,9 +65,6 @@ def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True)
     plt.savefig('portfolio_comparison.png', bbox_inches='tight', dpi=300)
     print("\nPortfolio comparison charts have been saved as 'portfolio_comparison.png'")
     
-    # Show the plot
-    plt.show()
-    
     # Print detailed comparison
     print("\nDetailed Portfolio Comparison:")
     print("\nCompany\t\tInitial Weight\tOptimized Weight\tChange")
@@ -62,6 +73,7 @@ def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True)
         initial = initial_weights[company]
         optimized = optimized_weights['portfolio_weights'][company]
         change = optimized - initial
-        print(f"{company[:15]:<15} {initial:>10.1%} {optimized:>15.1%} {change:>10.1%}") 
+        company_label = _display_name(company)
+        print(f"{company_label[:15]:<15} {initial:>10.1%} {optimized:>15.1%} {change:>10.1%}") 
 
     return fig
