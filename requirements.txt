@@ -14,8 +14,9 @@ langchain
 langchain-community
 duckduckgo-search
 langchain-core
-streamlit
+streamlit>=1.32
 firebase-admin
 matplotlib
 langchain-groq
 plotly
+altair==4.2.2
