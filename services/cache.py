@@ -42,6 +42,6 @@ def cached_transactions(user_id):
 from ml.train import train_models
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def cached_prediction(ticker, company):
     return train_models(ticker, company)

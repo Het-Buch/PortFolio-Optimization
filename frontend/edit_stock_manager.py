@@ -19,6 +19,10 @@ def edit_stock_manager():
 
     st.title("Edit Stock")
 
+    if st.button("Back to Home"):
+        st.session_state["page"] = "manager_home"
+        st.rerun()
+
     stock_id = st.session_state.get("selected_stock")
 
     if not stock_id:
@@ -46,6 +50,11 @@ def edit_stock_manager():
         value=stock_data.get("ticker", "")
     ).upper()
 
+    sector = st.text_input(
+        "Sector",
+        value=str(stock_data.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
+    ).strip() or "Unknown"
+
     stock_price = st.number_input(
         "Stock Price",
         value=round(float(stock_data.get("price", 0.0)), 2),
@@ -63,7 +72,8 @@ def edit_stock_manager():
                 stock_name,
                 stock_ticker,
                 stock_price,
-                st.session_state["user"]
+                st.session_state["user"],
+                sector,
             )
 
             if success:

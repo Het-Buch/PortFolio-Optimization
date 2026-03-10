@@ -6,6 +6,10 @@ def add_stock():
 
     st.title("Add New Stock")
 
+    if st.button("Back to Home"):
+        st.session_state["page"] = "manager_home"
+        st.rerun()
+
     # Persist fetched data
     if "stock_name" not in st.session_state:
         st.session_state.stock_name = ""
@@ -15,6 +19,9 @@ def add_stock():
 
     if "valid_stock" not in st.session_state:
         st.session_state.valid_stock = False
+
+    if "stock_sector" not in st.session_state:
+        st.session_state.stock_sector = "Unknown"
 
 
     stock_ticker = st.text_input("Stock Symbol").strip().upper()
@@ -32,6 +39,7 @@ def add_stock():
 
                 st.session_state.stock_name = name
                 st.session_state.stock_price = price
+                st.session_state.stock_sector = str(data.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
                 st.session_state.valid_stock = True
 
                 if price > 0:
@@ -42,6 +50,7 @@ def add_stock():
             else:
                 st.session_state.stock_name = stock_ticker
                 st.session_state.stock_price = 0.0
+                st.session_state.stock_sector = "Unknown"
                 st.session_state.valid_stock = True
                 st.warning("Live price unavailable right now. You can still add this stock and price will load later.")
 
@@ -51,6 +60,12 @@ def add_stock():
         value=st.session_state.stock_name,
         disabled=True
     )
+
+    sector = st.text_input(
+        "Sector",
+        value=st.session_state.stock_sector,
+        placeholder="e.g., IT, Banking, Pharma"
+    ).strip() or "Unknown"
 
     st.number_input(
         "Stock Price",
@@ -69,12 +84,14 @@ def add_stock():
             if add_stock_to_db(
                 st.session_state.stock_name,
                 stock_ticker,
-                st.session_state.stock_price
+                st.session_state.stock_price,
+                sector
             ):
                 st.toast("Stock added successfully")
                 # Clear cached values
                 st.session_state.stock_name = ""
                 st.session_state.stock_price = 0.0
+                st.session_state.stock_sector = "Unknown"
                 st.session_state.valid_stock = False
                 st.session_state["page"] = "manager_home"
                 st.rerun()
@@ -83,7 +100,7 @@ def add_stock():
 
     with col2:
 
-        if st.button("Go to Home Page"):
+        if st.button("Back to Home", key="add_stock_back_bottom"):
 
             st.session_state["page"] = "manager_home"
             st.rerun()

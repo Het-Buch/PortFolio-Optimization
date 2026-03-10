@@ -17,6 +17,9 @@ def show_users():
 
     if not users:
         st.warning("No users found.")
+        if st.button("Back to Home"):
+            st.session_state["page"] = "manager_home"
+            st.rerun()
         return
 
     user_data = [
@@ -41,7 +44,7 @@ def show_users():
 
     st.divider()
 
-    if st.button("Back to Dashboard"):
+    if st.button("Back to Home"):
         st.session_state["page"] = "manager_home"
         st.rerun()
 

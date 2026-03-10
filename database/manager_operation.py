@@ -55,7 +55,7 @@ def stock_exists(stock_ticker):
         print(f"Error checking stock: {e}")
         return False
 
-def add_stock_to_db(stock_name, stock_ticker, stock_price=0.0):
+def add_stock_to_db(stock_name, stock_ticker, stock_price=0.0, sector="Unknown"):
     try:
 
         # Check if stock already exists
@@ -71,6 +71,7 @@ def add_stock_to_db(stock_name, stock_ticker, stock_price=0.0):
             "name": stock_name,
             "ticker": stock_ticker,
             "price": float(stock_price or 0),
+            "sector": str(sector or "Unknown").strip() or "Unknown",
             "stock_id": stock_id,
             "is_deleted": False,
             "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -94,7 +95,13 @@ def get_all_stocks_from_db():
         # Fetch all stocks ordered by stock_id
         stocks = ref.get()
 
-        return stocks if stocks else {}
+        if not stocks:
+            return {}
+
+        for stock in stocks.values():
+            stock["sector"] = str(stock.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
+
+        return stocks
     except Exception as e:
         print(f"Error fetching stocks: {e}")
         return None
@@ -199,7 +206,7 @@ def get_stock_data(stock_id):
         print(f"Error fetching stock data: {e}")
         return None
     
-def update_stock_data(stock_id,stock_name, stock_ticker, stock_price, user_id):
+def update_stock_data(stock_id, stock_name, stock_ticker, stock_price, user_id, sector="Unknown"):
     try:
         # Reference to the database path
         ref = db.reference("stocks")
@@ -214,6 +221,7 @@ def update_stock_data(stock_id,stock_name, stock_ticker, stock_price, user_id):
             "name": stock_name,
             "ticker": stock_ticker,
             "price": stock_price,
+            "sector": str(sector or "Unknown").strip() or "Unknown",
             "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "updated_by": user_id  
         })

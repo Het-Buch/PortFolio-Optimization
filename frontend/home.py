@@ -4,6 +4,30 @@ from services.cache import cached_user, cached_portfolio
 from services.stock_services import fetch_stock_data
 from database.curd import sell_stock
 
+
+def _display_symbol(raw_ticker):
+    ticker = str(raw_ticker or "").strip().upper()
+    return ticker.replace(".NS", "")
+
+
+def _looks_like_ticker_name(value):
+    text = str(value or "").strip().upper()
+    if not text:
+        return True
+    if text.endswith(".NS"):
+        return True
+    return all(ch.isalnum() or ch in {".", "-", "&"} for ch in text) and len(text) <= 15
+
+
+def _resolved_company_name(raw_name, ticker, name_map):
+    ticker_key = str(ticker or "").strip().upper()
+    fetched = str((name_map or {}).get(ticker_key, "")).strip()
+    raw = str(raw_name or "").strip()
+
+    if fetched and (_looks_like_ticker_name(raw) or not raw):
+        return fetched
+    return raw or fetched or _display_symbol(ticker_key)
+
 def home():
 
     if "user" not in st.session_state:
@@ -32,6 +56,10 @@ def home():
 
     if st.sidebar.button("Profile"):
         st.session_state.page = "profile"
+        st.rerun()
+
+    if st.sidebar.button("Show Portfolio Sectors"):
+        st.session_state.page = "sector_user"
         st.rerun()
 
     if st.sidebar.button("Logout"):
@@ -80,6 +108,14 @@ def home():
             if grouped_stocks[group_key]["target_price"] == 0:
                 grouped_stocks[group_key]["target_price"] = stock_target_price
 
+    ticker_list = [
+        str(s.get("ticker", "")).strip().upper()
+        for s in grouped_stocks.values()
+        if str(s.get("ticker", "")).strip()
+    ]
+    market_meta = fetch_stock_data(ticker_list) if ticker_list else {}
+    name_map = (market_meta or {}).get("name_map", {})
+
     stock_data = []
     display_prices = {}
     total_cost = 0
@@ -90,10 +126,8 @@ def home():
         market_price = 0
 
         if ticker:
-            data = fetch_stock_data(ticker)
             ticker_ns = ticker if ticker.endswith(".NS") else ticker + ".NS"
-            if data:
-                market_price = round(data.get(ticker_ns, data.get("price", 0)) or 0, 2)
+            market_price = round((market_meta or {}).get(ticker_ns, 0) or 0, 2)
 
         quantity = int(stock.get("quantity", 0) or 0)
         stored_price = float(stock.get("total_cost", 0) or 0) / quantity if quantity > 0 else 0
@@ -112,17 +146,19 @@ def home():
                     sold_any = True
 
             if sold_any:
-                auto_sold.append(f"{stock.get('company_name', 'Stock')} @ ₹{sell_check_price}")
+                sold_name = _resolved_company_name(stock.get("company_name", ""), ticker, name_map)
+                auto_sold.append(f"{sold_name} @ ₹{sell_check_price}")
                 continue
 
         total = float(stock.get("total_cost", 0) or 0)
-        price_display = avg_buy_price if avg_buy_price > 0 else "NA"
-        total_display = round(total, 2) if total > 0 else "NA"
+        price_display = avg_buy_price if avg_buy_price > 0 else None
+        total_display = round(total, 2) if total > 0 else None
+        display_company_name = _resolved_company_name(stock.get("company_name", ""), ticker, name_map)
         stock_data.append([
-            stock["company_name"],
+            display_company_name,
             quantity,
             price_display,
-            target_price if target_set else "NA",
+            target_price if target_set else None,
             total_display
         ])
         if total > 0:
@@ -138,6 +174,10 @@ def home():
         columns=["Company", "Quantity", "Price", "Target", "Total"]
     )
 
+    # Keep columns numeric to avoid Streamlit/PyArrow conversion warnings.
+    for col in ["Quantity", "Price", "Target", "Total"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
     df.index = df.index + 1
 
     st.write(f"Total Stocks: {len(df)}")
@@ -150,7 +190,9 @@ def home():
     stock_map = {}
     label_counts = {}
     for key, value in grouped_stocks.items():
-        base_label = f'{value["company_name"]} ({value.get("ticker", "")})'
+        display_ticker = _display_symbol(value.get("ticker", ""))
+        display_name = _resolved_company_name(value.get("company_name", ""), value.get("ticker", ""), name_map)
+        base_label = f"{display_name} ({display_ticker})" if display_ticker else display_name
         count = label_counts.get(base_label, 0) + 1
         label_counts[base_label] = count
         label = base_label if count == 1 else f"{base_label} #{count}"

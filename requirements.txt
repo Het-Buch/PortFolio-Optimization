@@ -18,3 +18,4 @@ streamlit
 firebase-admin
 matplotlib
 langchain-groq
+plotly
