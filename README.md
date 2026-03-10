@@ -14,8 +14,7 @@
 - [⚙️ Setup & Installation](#%EF%B8%8F-setup--installation)
 - [🔥 Firebase Setup](#-firebase-setup)
 - [▶️ Running the App](#%EF%B8%8F-running-the-app)
-- [👥 Team](#-team)
-
+  
 ---
 
 ## ✨ Features
