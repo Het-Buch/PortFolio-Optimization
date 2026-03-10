@@ -156,8 +156,8 @@ portfolio-optimization/
 │   ├── manager_login.py             # Manager login page
 │   ├── manger_home.py               # Manager dashboard
 │   ├── add_stock.py                 # Add new stock (manager)
-│   ├── sector_manager.py                   # Sector wise portfolio distribution of all stocks add by manager
-│   ├── sector_user.py                   # Sector wise portfolio distribution of user portfolio
+│   ├── sector_manager.py            # Sector wise portfolio distribution of all stocks add by manager
+│   ├── sector_user.py               # Sector wise portfolio distribution of user portfolio
 │   ├── show_stock.py                # View all stocks (manager)
 │   ├── show_users.py                # View all users (manager)
 │   ├── edit_stock_manager.py        # Edit stock details (manager)
