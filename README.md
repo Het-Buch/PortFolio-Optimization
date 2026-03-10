@@ -333,7 +333,7 @@ The app will open at **http://localhost:8501**
 
 ---
 
-Live Demo - [Demo]([URL](https://portfolio-optimization-agentic-ai.streamlit.app/))
+Live Demo - [Launch Portfolio Optimization App](https://portfolio-optimization-agentic-ai.streamlit.app/)
 
 ---
 > ⚠️ **Disclaimer:** This system provides AI-generated investment insights for educational purposes only. It does not guarantee financial returns and does not execute trades automatically. Always consult a certified financial advisor before making investment decisions.
