@@ -20,6 +20,7 @@ def show_stocks():
             "ID": stock_id,
             "Name": stock.get("name"),
             "Ticker": stock.get("ticker"),
+            "Sector": stock.get("sector", "Unknown"),
         }
         for stock_id, stock in stocks.items()
         if not stock.get("is_deleted", False)
@@ -52,33 +53,22 @@ def show_stocks():
     )
     selected_stock = stock_map[selected_display]
 
-    col1, col2 = st.columns(2)
+    if st.button("Delete Stock"):
 
-    with col1:
-        if st.button("Edit Stock"):
+        success = delete_stock_from_db(selected_stock)
 
-            st.session_state["selected_stock"] = selected_stock
-            st.session_state["page"] = "edit_stock_manager"
-
+        if success:
+            # clear cache so table refreshes immediately
+            cached_stocks.clear()
+            st.toast("Stock deleted successfully")
             st.rerun()
 
-    with col2:
-        if st.button("Delete Stock"):
-
-            success = delete_stock_from_db(selected_stock)
-
-            if success:
-                # clear cache so table refreshes immediately
-                cached_stocks.clear()
-                st.toast("Stock deleted successfully")
-                st.rerun()
-
-            else:
-                st.error("Failed to delete stock.")
+        else:
+            st.error("Failed to delete stock.")
 
     st.divider()
 
-    if st.button("Back to Dashboard"):
+    if st.button("Back to Home"):
         st.session_state["page"] = "manager_home"
         st.rerun()
 

@@ -3,6 +3,10 @@ from services.cache import cached_stocks, cached_portfolio
 from database.curd import add_purchase_to_db
 from services.stock_services import fetch_stock_data
 
+
+def _clean_ticker(ticker):
+    return str(ticker or "").strip().upper()
+
 def buy():
 
     # Check login first
@@ -34,11 +38,26 @@ def buy():
         st.warning("No active stocks available.")
         return
 
-    company_names = sorted(v["name"] for v in active_stocks.values())
+    tickers = [_clean_ticker(v.get("ticker", "")) for v in active_stocks.values()]
+    market_meta = fetch_stock_data(tickers) if tickers else {}
+    name_map = (market_meta or {}).get("name_map", {})
+
+    display_to_id = {}
+    for sid, stock in active_stocks.items():
+        ticker = _clean_ticker(stock.get("ticker", ""))
+        fallback_name = str(stock.get("name", "") or "").strip()
+        resolved_name = str(name_map.get(ticker, fallback_name)).strip() or fallback_name or ticker.replace(".NS", "")
+        display_to_id[f"{resolved_name} ({ticker.replace('.NS', '')})"] = sid
+
+    company_names = sorted(display_to_id.keys())
 
     st.subheader("Purchase Stocks")
 
-    company_name = st.selectbox("Select Company", company_names, index=None, placeholder="Choose a stock")
+    selected_label = st.selectbox("Select Company", company_names, index=None, placeholder="Choose a stock")
+
+    if not selected_label:
+        st.info("Select a stock to view price and continue.")
+        return
 
     quantity = st.number_input(
         "Enter quantity",
@@ -46,17 +65,16 @@ def buy():
         step=1
     )
 
-    selected_stock = next(
-        (v for v in active_stocks.values() if v["name"] == company_name),
-        None
-    )
+    selected_stock_id = display_to_id.get(selected_label)
+    selected_stock = active_stocks.get(selected_stock_id)
 
     if not selected_stock:
-        st.error("Stock not found.")
+        st.warning("Selected stock is unavailable. Please choose another stock.")
         return
 
     ticker = str(selected_stock["ticker"]).strip().upper()
     stock_id = selected_stock["stock_id"]
+    company_name = str(name_map.get(ticker, selected_stock.get("name", ""))).strip() or ticker.replace(".NS", "")
     # fetch live price
     data = fetch_stock_data([ticker])
     ticker_ns = ticker if ticker.endswith(".NS") else ticker + ".NS"

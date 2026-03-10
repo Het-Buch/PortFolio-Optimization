@@ -9,6 +9,48 @@ from ml.agentic import analyze_portfolio
 from services.cache import cached_prediction
 from services.stock_services import fetch_stock_data
 import time
+from datetime import datetime
+
+
+def _build_fallback_ai_report(portfolio_data, optimized_weights, initial_weights):
+    """Create a deterministic analysis when external AI provider is unavailable."""
+    changes = []
+    company_specific = {}
+
+    for company in portfolio_data.get("portfolio", []):
+        name = company.get("company", "Unknown")
+        initial = float(initial_weights.get(name, 0) or 0)
+        optimized = float((optimized_weights.get("portfolio_weights", {}) or {}).get(name, 0) or 0)
+        delta = optimized - initial
+
+        direction = "increase" if delta > 0 else ("decrease" if delta < 0 else "hold")
+        changes.append(f"- {name}: {initial:.1%} -> {optimized:.1%} ({delta:+.1%}, {direction})")
+        company_specific[name] = (
+            f"Weight changed from {initial:.1%} to {optimized:.1%} ({delta:+.1%}). "
+            f"Recommendation: {direction.upper()} allocation based on current return-risk optimization output."
+        )
+
+    metrics = optimized_weights.get("portfolio_metrics", {}) or {}
+    summary_lines = [
+        "AI provider was unavailable, so this is a rule-based fallback analysis.",
+        "",
+        "Allocation summary:",
+        *changes,
+        "",
+        "Portfolio metrics:",
+        f"- Expected Return: {float(metrics.get('expected_return', 0) or 0):.2%}",
+        f"- Portfolio Risk: {float(metrics.get('portfolio_risk', 0) or 0):.2%}",
+        f"- Sharpe Ratio: {float(metrics.get('sharpe_ratio', 0) or 0):.2f}",
+        "",
+        "Note: For narrative market context, re-enable live AI after fixing GROQ access.",
+    ]
+
+    return {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "overall_analysis": "\n".join(summary_lines),
+        "company_specific_analysis": company_specific,
+        "portfolio_metrics": metrics,
+    }
 
 # from train import train_models
 # from news import filter_data
@@ -61,14 +103,34 @@ def objective_function(weights, returns, cov_matrix, risk_free_rate=0.02):
     return -sharpe_ratio
 
 def calculate_initial_weights(portfolio_data):
-    """Calculate initial weights based on number of stocks owned."""
+    """Calculate initial weights based on portfolio value, falling back to quantity."""
+    total_value = sum(float(company.get('position_value', 0) or 0) for company in portfolio_data['portfolio'])
+
+    if total_value > 0:
+        return {
+            company['company']: float(company.get('position_value', 0) or 0) / total_value
+            for company in portfolio_data['portfolio']
+        }
+
     total_stocks = sum(company['stocks_owned'] for company in portfolio_data['portfolio'])
+
+    if total_stocks <= 0:
+        return {company['company']: 0.0 for company in portfolio_data['portfolio']}
+
     return {
         company['company']: company['stocks_owned'] / total_stocks
         for company in portfolio_data['portfolio']
     }
 
-def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, use_market_agents=True):
+def optimize_portfolio(
+    portfolio_data,
+    show_charts=True,
+    use_ai_analysis=False,
+    use_market_agents=False,
+    use_ml_prediction=False,
+    use_news_sentiment=False,
+    preloaded_quotes=None,
+):
     """Optimize portfolio using PSO."""
     # Extract data
     # print(portfolio_data)
@@ -77,43 +139,76 @@ def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, u
     
     n_assets = len(companies)
     
-    # Get predicted prices and sentiment scores
+    # Get expected returns and sentiment scores
     returns_data = []
     sentiment_scores = []
     valid_companies = []
 
     print("Processing companies...")
 
+    normalized_tickers = []
+    for company in companies:
+        ticker = str(company.get("ticker", "")).strip().upper()
+        if ticker and not ticker.endswith(".NS"):
+            ticker = ticker + ".NS"
+        normalized_tickers.append(ticker)
+
+    quote_map = preloaded_quotes or fetch_stock_data(normalized_tickers)
+
     for company in companies:
 
-        ticker = company["ticker"].upper()
+        ticker = str(company.get("ticker", "")).strip().upper()
         if not ticker.endswith(".NS"):
             ticker = ticker + ".NS"
         print(f"\nProcessing {company['company']} ({ticker})")
-        price_data = cached_prediction(ticker, company["company"])
-        time.sleep(1)
+        price_data = None
+        if use_ml_prediction:
+            price_data = cached_prediction(ticker, company["company"])
+            time.sleep(0.25)
 
-        if price_data and "Predicted Price" in price_data:
+        current_price = float((quote_map or {}).get(ticker, 0) or 0)
+        owned = int(company.get("stocks_owned", 0) or 0)
+        position_value = float(company.get("position_value", 0) or 0)
+        implied_price = (position_value / owned) if owned > 0 else 0.0
+        fallback_price = current_price or implied_price
+
+        if price_data and "Predicted Price" in price_data and current_price > 0:
 
             predicted_price = float(price_data["Predicted Price"])
-            returns_data.append(predicted_price)
+
+            # Use percentage expected return instead of absolute price level.
+            expected_return = (predicted_price - current_price) / current_price
+            expected_return = float(np.clip(expected_return, -1.0, 1.0))
+
+            returns_data.append(expected_return)
             valid_companies.append(company)
 
-            print(f"Predicted price: {predicted_price}")
+            if use_news_sentiment:
+                news_data = filter_data(company['company'])
+                sentiment_scores.append(float(news_data.get("sentiment", 0) or 0))
+            else:
+                sentiment_scores.append(0.05)
+
+            print(f"Predicted price: {predicted_price} | Current price: {current_price} | Expected return: {expected_return:.4f}")
 
         else:
-            fallback_quote = fetch_stock_data(ticker)
-            fallback_price = float((fallback_quote or {}).get(ticker, (fallback_quote or {}).get("price", 0)) or 0)
-
             if fallback_price > 0:
-                returns_data.append(fallback_price)
+                # If prediction is unavailable, treat expected return as neutral.
+                returns_data.append(0.0)
                 valid_companies.append(company)
-                print(f"Using fallback live price: {fallback_price}")
+                if use_news_sentiment:
+                    news_data = filter_data(company['company'])
+                    sentiment_scores.append(float(news_data.get("sentiment", 0) or 0))
+                else:
+                    sentiment_scores.append(0.05)
+                print(f"Using fallback live price: {fallback_price} with neutral expected return")
             else:
-                print(f"Skipping {company['company']} - prediction failed")
+                # Keep asset with neutral assumptions instead of failing the full optimization run.
+                returns_data.append(0.0)
+                valid_companies.append(company)
+                sentiment_scores.append(0.05)
+                print(f"Using neutral fallback for {company['company']} due to missing quote")
 
-        news_data = filter_data(company['company'])
-        sentiment_scores.append(news_data.get("sentiment", 0))
     companies = valid_companies
     n_assets = len(companies)
 
@@ -176,7 +271,22 @@ def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, u
     if use_ai_analysis:
         print("\nGenerating AI analysis of portfolio changes...")
         ai_report = analyze_portfolio(portfolio_data, optimized_weights, initial_weights)
-        optimized_weights['ai_analysis'] = ai_report
+        overall_text = str((ai_report or {}).get("overall_analysis", ""))
+        ai_unavailable = (
+            (not ai_report)
+            or ("unable to generate analysis" in overall_text.lower())
+            or ("api error" in overall_text.lower())
+            or ("organization has been restricted" in overall_text.lower())
+        )
+
+        if not ai_unavailable:
+            optimized_weights['ai_analysis'] = ai_report
+        else:
+            optimized_weights['ai_analysis'] = _build_fallback_ai_report(
+                portfolio_data,
+                optimized_weights,
+                initial_weights,
+            )
 
 
     
@@ -192,6 +302,12 @@ def optimize_portfolio(portfolio_data, show_charts=True, use_ai_analysis=True, u
                 initial_weights
             )
             optimized_weights['market_analysis'] = market_analysis
+        except ImportError as e:
+            print(f"Skipping market-agent analysis: optional dependency missing ({e})")
+            optimized_weights['market_analysis'] = {
+                "status": "skipped",
+                "reason": f"optional dependency missing: {e}"
+            }
         except Exception as e:
             print(f"Skipping market-agent analysis: {e}")
             optimized_weights['market_analysis'] = {
@@ -215,8 +331,10 @@ def main():
     result,fig = optimize_portfolio(
         portfolio_data, 
         show_charts=True, 
-        use_ai_analysis=True,
-        use_market_agents=True
+        use_ai_analysis=False,
+        use_market_agents=False,
+        use_ml_prediction=False,
+        use_news_sentiment=False,
     )
     
     print("\nOptimization Results:")

@@ -170,6 +170,52 @@ from ml.optimization import optimize_portfolio
 from services.cache import cached_portfolio
 from services.stock_services import fetch_stock_data
 
+
+def _display_name(name_or_ticker):
+    return str(name_or_ticker or "").replace(".NS", "").strip()
+
+
+def _looks_like_ticker_name(value):
+    text = str(value or "").strip().upper()
+    if not text:
+        return True
+    if text.endswith(".NS"):
+        return True
+    return all(ch.isalnum() or ch in {".", "-", "&"} for ch in text) and len(text) <= 15
+
+
+def _resolved_company_name(raw_name, ticker, name_map):
+    key = str(ticker or "").strip().upper()
+    raw = str(raw_name or "").strip()
+    fetched = str((name_map or {}).get(key, "")).strip()
+    if fetched and (_looks_like_ticker_name(raw) or not raw):
+        return fetched
+    return raw or fetched or _display_name(key)
+
+
+def _aggregate_holdings(active_stocks):
+    """Combine multiple purchase entries for the same ticker into one holding."""
+    aggregated = {}
+
+    for s in active_stocks:
+        ticker = str(s.get("ticker", "")).strip().upper()
+        ticker = ticker if ticker.endswith(".NS") else (ticker + ".NS" if ticker else "")
+        if not ticker:
+            continue
+
+        if ticker not in aggregated:
+            aggregated[ticker] = {
+                "company_name": _display_name(s.get("company_name", ticker.replace(".NS", ""))),
+                "ticker": ticker,
+                "quantity": 0,
+                "total_cost": 0.0,
+            }
+
+        aggregated[ticker]["quantity"] += int(s.get("quantity", 0) or 0)
+        aggregated[ticker]["total_cost"] += float(s.get("total_cost", 0) or 0)
+
+    return list(aggregated.values())
+
 def optimize():
 
     if "user" not in st.session_state:
@@ -200,9 +246,19 @@ def optimize():
         st.warning("No active stocks in portfolio.")
         return
 
-    # Portfolio display
+    # Portfolio display (deduplicated by ticker)
+    holdings = _aggregate_holdings(active_stocks)
+
+    if not holdings:
+        st.warning("No valid holdings available for optimization.")
+        return
+
     table_rows = []
-    for s in active_stocks:
+    ticker_list = [str(s.get("ticker", "")).strip().upper() for s in holdings if str(s.get("ticker", "")).strip()]
+    market_meta = fetch_stock_data(ticker_list) if ticker_list else {}
+    name_map = (market_meta or {}).get("name_map", {})
+
+    for s in holdings:
         quantity = int(s.get("quantity", 0) or 0)
         total_cost = float(s.get("total_cost", 0) or 0)
 
@@ -211,20 +267,20 @@ def optimize():
 
         live_price = 0.0
         if ticker_ns:
-            quote = fetch_stock_data(ticker_ns)
-            if quote:
-                live_price = float(quote.get(ticker_ns, quote.get("price", 0)) or 0)
+            live_price = float((market_meta or {}).get(ticker_ns, 0) or 0)
 
         stored_price = float(s.get("price_per_stock", 0) or 0)
         derived_price = (total_cost / quantity) if quantity > 0 else 0
         display_price = round(live_price or stored_price or derived_price, 2)
 
         table_rows.append({
-            "Company": s["company_name"],
+            "Company": _resolved_company_name(s.get("company_name", ""), ticker_ns, name_map),
             "Quantity": quantity,
             "Price": display_price,
             "Total Cost": round(total_cost, 2),
         })
+
+        s["position_value"] = float(quantity * display_price)
 
     df = pd.DataFrame(table_rows)
 
@@ -237,17 +293,59 @@ def optimize():
         "user": user_id,
         "portfolio": [
             {
-                "company": s["company_name"],
+                "company": _resolved_company_name(s.get("company_name", ""), s.get("ticker", ""), name_map),
                 "ticker": s["ticker"],
                 "stocks_owned": s["quantity"],
+                "position_value": float(s.get("position_value", 0) or 0),
             }
-            for s in active_stocks
+            for s in holdings
         ]
     }
 
+    use_ml_prediction = st.checkbox(
+        "Use ML prediction (slow, may rate limit)",
+        value=False,
+        help="When enabled, optimization trains per-stock models via yfinance history. Keep off for faster and more reliable runs.",
+    )
+
+    use_ai_analysis = st.checkbox(
+        "Use AI narrative analysis (slow)",
+        value=False,
+        help="Calls external LLM APIs for explanation. Turn off for fastest reliable optimization results.",
+    )
+
+    use_news_sentiment = st.checkbox(
+        "Use live news sentiment (slow)",
+        value=False,
+        help="Scrapes external news websites per company. Keep off to avoid delays/rate limits.",
+    )
+
+    company_count = len(send_data.get("portfolio", []))
+    quote_calls = 1  # batched quote fetch already performed above
+    yfinance_training_calls = company_count if use_ml_prediction else 0
+    ai_calls = (company_count + 1) if use_ai_analysis else 0  # overall + company-specific analysis
+    news_calls = company_count * 2 if use_news_sentiment else 0
+
+    if use_ml_prediction:
+        st.warning(
+            f"Estimated external load: quotes ~{quote_calls}, yfinance training ~{yfinance_training_calls}, AI calls ~{ai_calls}. "
+            "This mode may trigger provider rate limits."
+        )
+    else:
+        st.caption(
+            f"Estimated external load (fast mode): quotes ~{quote_calls}, yfinance training ~0, AI calls ~{ai_calls}, news scrapes ~{news_calls}."
+        )
+
     if st.button("Optimize Portfolio"):
         with st.spinner("Optimizing portfolio..."):
-            result, fig = optimize_portfolio(send_data)
+            result, fig = optimize_portfolio(
+                send_data,
+                use_ai_analysis=use_ai_analysis,
+                use_market_agents=False,
+                use_ml_prediction=use_ml_prediction,
+                use_news_sentiment=use_news_sentiment,
+                preloaded_quotes=market_meta,
+            )
 
         if result is None or fig is None:
             st.error("Stock data unavailable due to rate limit. Please try again in a few minutes.")
@@ -256,8 +354,9 @@ def optimize():
         st.session_state["result"] = result
         st.session_state["fig"] = fig
 
-        st.session_state["analysis"] = result["ai_analysis"]["overall_analysis"]
-        st.session_state["company_analysis"] = result["ai_analysis"]["company_specific_analysis"]
+        ai_analysis = result.get("ai_analysis") or {}
+        st.session_state["analysis"] = ai_analysis.get("overall_analysis", "AI analysis unavailable.")
+        st.session_state["company_analysis"] = ai_analysis.get("company_specific_analysis", {})
     
     if "fig" in st.session_state:
         st.success("Portfolio optimized successfully!")
@@ -265,6 +364,8 @@ def optimize():
         
     if st.session_state.get("analysis"):
         st.subheader("Overall Analysis")
+        if "api error" in str(st.session_state["analysis"]).lower() or "organization has been restricted" in str(st.session_state["analysis"]).lower():
+            st.warning("Live AI provider error detected. Showing fallback analysis.")
         st.write(st.session_state["analysis"])
 
     if st.session_state.get("company_analysis"):
@@ -273,7 +374,7 @@ def optimize():
 
         for company, analysis in st.session_state["company_analysis"].items():
 
-            st.markdown(f"**{company}**")
+            st.markdown(f"**{_display_name(company)}**")
             st.write(analysis)
 
     if st.button("Home"):
