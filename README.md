@@ -157,6 +157,8 @@ portfolio-optimization/
 │   ├── manager_login.py             # Manager login page
 │   ├── manger_home.py               # Manager dashboard
 │   ├── add_stock.py                 # Add new stock (manager)
+│   ├── sector_manager.py                   # Sector wise portfolio distribution of all stocks add by manager
+│   ├── sector_user.py                   # Sector wise portfolio distribution of user portfolio
 │   ├── show_stock.py                # View all stocks (manager)
 │   ├── show_users.py                # View all users (manager)
 │   ├── edit_stock_manager.py        # Edit stock details (manager)
@@ -332,4 +334,7 @@ The app will open at **http://localhost:8501**
 
 ---
 
+Live Demo - [Demo]([URL](https://portfolio-optimization-agentic-ai.streamlit.app/))
+
+---
 > ⚠️ **Disclaimer:** This system provides AI-generated investment insights for educational purposes only. It does not guarantee financial returns and does not execute trades automatically. Always consult a certified financial advisor before making investment decisions.
