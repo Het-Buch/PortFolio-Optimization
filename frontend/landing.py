@@ -47,6 +47,10 @@ def landing():
         from frontend.profile import profile
         profile()
 
+    elif page == "sector_user":
+        from frontend.sector_user import sector_user
+        sector_user()
+
     elif page == "buy":
         from frontend.buy import buy
         buy()
@@ -71,10 +75,18 @@ def landing():
         from frontend.show_stock import show_stocks
         show_stocks()
 
+    elif page == "show_users":
+        from frontend.show_users import show_users
+        show_users()
+
+    elif page == "sector_manager":
+        from frontend.sector_manager import sector_manager
+        sector_manager()
+
     elif page == "edit_stock":
         from frontend.edit_stock import edit_stock
         edit_stock()
 
     elif page == "edit_stock_manager":
-        from frontend.edit_stock_manager import edit_stock_manager
-        edit_stock_manager()
+        st.session_state.page = "show_stocks"
+        st.rerun()

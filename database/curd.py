@@ -17,6 +17,12 @@ initialize_firebase()
 API_KEY = os.getenv("API_KEY")
 
 
+def _can_modify_purchase(stock_data, user_id):
+    owner_id = str((stock_data or {}).get("user_id", "")).strip()
+    actor_id = str(user_id or "").strip()
+    return bool(owner_id and actor_id and owner_id == actor_id and actor_id != "manager")
+
+
 def get_user_details(user_id):
     try:
         # Fetch user details from Firebase Realtime Database
@@ -182,17 +188,50 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
 
 def get_purchased_stocks(user_id):
     try:
+        from services.stock_services import fetch_stock_data
+
         ref = db.reference("purchases")
+        stocks_ref = db.reference("stocks")
         all_purchases = ref.get() or {}
+        all_stocks = stocks_ref.get() or {}
+
+        def normalize_sector(value):
+            text = str(value or "").strip()
+            if not text or text.lower() in {"none", "null", "nan", "n/a", "na", "unknown"}:
+                return "Unknown"
+            return text
+
+        stock_sector_map = {
+            sid: normalize_sector((s or {}).get("sector", "Unknown"))
+            for sid, s in all_stocks.items()
+        }
+
+        ticker_sector_map = {
+            str((s or {}).get("ticker", "")).strip().upper(): normalize_sector((s or {}).get("sector", "Unknown"))
+            for s in all_stocks.values()
+            if str((s or {}).get("ticker", "")).strip()
+        }
+
         portfolio = {}
+        missing_sector_tickers = set()
         for purchase_id, purchase in all_purchases.items():
             if purchase.get("user_id") != user_id or purchase.get("sold"):
                 continue
+
+            stock_id = purchase.get("stock_id")
+            ticker = str(purchase.get("ticker", "")).strip().upper()
+            sector = stock_sector_map.get(stock_id, "Unknown")
+            if sector == "Unknown" and ticker:
+                sector = ticker_sector_map.get(ticker, "Unknown")
+            if sector == "Unknown" and ticker:
+                missing_sector_tickers.add(ticker)
+
             portfolio[purchase_id] = {
                 "purchase_id": purchase_id,
-                "stock_id": purchase.get("stock_id"),
+                "stock_id": stock_id,
                 "company_name": purchase.get("company_name"),
                 "ticker": purchase.get("ticker"),
+                "sector": sector,
                 "quantity": purchase.get("quantity", 0),
                 "price_per_stock": purchase.get("price_per_stock", 0),
                 "total_cost": purchase.get("total_cost", 0),
@@ -200,6 +239,18 @@ def get_purchased_stocks(user_id):
                 "target_set": bool(purchase.get("target_set", False)),
                 "sold": bool(purchase.get("sold", False)),
             }
+
+        if missing_sector_tickers:
+            sector_meta = fetch_stock_data(sorted(missing_sector_tickers)) or {}
+            live_sector_map = (sector_meta or {}).get("sector_map", {})
+
+            for item in portfolio.values():
+                if item.get("sector") != "Unknown":
+                    continue
+                ticker = str(item.get("ticker", "")).strip().upper()
+                resolved_sector = normalize_sector(live_sector_map.get(ticker, "Unknown"))
+                item["sector"] = resolved_sector
+
         return portfolio
     except Exception as e:
         print(f"Error fetching user purchases: {e}")
@@ -228,6 +279,14 @@ def update_stock_data(purchased_id, price_per_stock, quantity, user_id):
             # Reference to the database path
             ref = db.reference("purchases")
 
+            stock_data = ref.child(purchased_id).get()
+            if not stock_data or stock_data.get("sold", False):
+                return False
+
+            if not _can_modify_purchase(stock_data, user_id):
+                print("Unauthorized update attempt blocked.")
+                return False
+
             # Update stock data for the given stock_id
             ref.child(purchased_id).update({
                 "quantity": quantity,
@@ -248,6 +307,10 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
 
         stock_data = ref.child(purchased_id).get()
         if not stock_data or stock_data.get("sold", False):
+            return False
+
+        if not _can_modify_purchase(stock_data, user_id):
+            print("Unauthorized sell attempt blocked.")
             return False
 
         quantity = int(stock_data.get("quantity", 0) or 0)
@@ -301,6 +364,10 @@ def set_target_price(purchased_id, target_price, user_id):
         stock_data = ref.child(purchased_id).get()
 
         if not stock_data or stock_data.get("sold", False):
+            return False
+
+        if not _can_modify_purchase(stock_data, user_id):
+            print("Unauthorized target update attempt blocked.")
             return False
 
         ref.child(purchased_id).update({
