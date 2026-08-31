@@ -3,6 +3,7 @@
 import json
 
 import numpy as np
+import streamlit as st
 
 from ml import optimizers
 from services.stock_services import get_history, get_prices, normalize_ticker, display_symbol
@@ -60,8 +61,14 @@ def get_news_sentiment(company):
     }
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def run_optimizer(tickers, algorithm="PSO"):
-    """Optimal weights for a ticker set under one algorithm."""
+    """Optimal weights for a ticker set under one algorithm.
+
+    Cached: several agents hold this tool, and re-running seven swarms over
+    identical inputs inside one debate is pure waste. TTL matches the price
+    cache, so results never outlive the data they came from.
+    """
     hist = get_history(tickers, period="2y")
     if hist.empty:
         return {"error": "no history for optimization"}
@@ -80,8 +87,13 @@ def run_optimizer(tickers, algorithm="PSO"):
     }
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def compare_algorithms(tickers):
-    """All seven algorithms on the same problem, ranked by Sharpe."""
+    """All seven algorithms on the same problem, ranked by Sharpe.
+
+    The most expensive tool in the registry, and both bear and quant can call
+    it in the same debate -- cache it or pay for it twice.
+    """
     hist = get_history(tickers, period="2y")
     if hist.empty:
         return {"error": "no history for comparison"}
