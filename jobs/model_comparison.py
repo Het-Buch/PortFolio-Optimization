@@ -51,14 +51,22 @@ def _dirs(target):
         d.mkdir(parents=True, exist_ok=True)
 
 
+MLFLOW_DB = ROOT / "mlflow.db"
+
+
 def _mlflow():
-    """File-backed MLflow. No server, no network -- view it with `mlflow ui`."""
+    """Local SQLite-backed MLflow. No server; MLflow 3.x rejects the file store."""
     try:
         import mlflow
     except ImportError:
         return None
     MLRUNS.mkdir(exist_ok=True)
-    mlflow.set_tracking_uri(f"file:{MLRUNS.as_posix()}")
+    try:
+        mlflow.set_tracking_uri(f"sqlite:///{MLFLOW_DB.as_posix()}")
+        mlflow.search_experiments(max_results=1)
+    except Exception as e:
+        print(f"  MLflow disabled ({type(e).__name__}: {e}); continuing without it")
+        return None
     return mlflow
 
 
@@ -215,8 +223,12 @@ def build_dataset(tickers, target="price"):
         X, y = frames[0]
         return X.drop(columns="__ticker"), y
 
-    X = pd.concat([f[0] for f in frames]).sort_index()
-    y = pd.concat([f[1] for f in frames]).loc[X.index]
+    # Pooled tickers share trading dates, so the index has duplicates. Align
+    # positionally and sort by position -- a .loc lookup here raises.
+    X = pd.concat([f[0] for f in frames])
+    y = pd.concat([f[1] for f in frames])
+    order = np.argsort(X.index.values, kind="stable")
+    X, y = X.iloc[order], y.iloc[order]
     return X.drop(columns="__ticker"), y
 
 
@@ -618,7 +630,13 @@ def main():
 
         mf = _mlflow()
         if mf:
-            mf.set_experiment(f"portfolio-{target}")
+            name = f"portfolio-{target}"
+            # Create with an explicit artifact dir the first time; reuse after.
+            if mf.get_experiment_by_name(name) is None:
+                (MLRUNS / target).mkdir(parents=True, exist_ok=True)
+                mf.create_experiment(name,
+                                     artifact_location=(MLRUNS / target).as_uri())
+            mf.set_experiment(name)
         with _start(mf, f"sweep-{target}"):
             _log_params(mf, {"target": target, "seed": SEED,
                              "cv": f"TimeSeriesSplit({N_SPLITS})",
