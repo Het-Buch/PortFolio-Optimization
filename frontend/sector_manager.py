@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend.manger_home import require_manager
 import pandas as pd
 import plotly.express as px
 
@@ -12,9 +14,7 @@ PIE_COLORS = [
 
 
 def sector_manager():
-    if "user" not in st.session_state or st.session_state["user"] != "manager":
-        st.session_state["page"] = "landing"
-        st.rerun()
+    if not require_manager():
         return
 
     st.title("Added Stocks by Sector")

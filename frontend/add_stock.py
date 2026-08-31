@@ -1,109 +1,49 @@
+"""Add a stock by ticker. Name and sector are fetched, never typed."""
+
 import streamlit as st
+
 from database.manager_operation import add_stock_to_db
-from services.stock_services import fetch_stock_data
+from frontend.manger_home import require_manager
+from services.cache import cached_stocks
+from services.stock_services import get_profile, get_price, display_symbol
+
 
 def add_stock():
+    if not require_manager():
+        return
 
-    st.title("Add New Stock")
+    st.title("Add Stock")
+    st.caption("Enter an NSE symbol. Everything else is resolved from market data.")
 
-    if st.button("Back to Home"):
-        st.session_state["page"] = "manager_home"
-        st.rerun()
+    symbol = st.text_input("NSE Symbol", placeholder="TCS").strip().upper()
+    if not symbol:
+        return
 
-    # Persist fetched data
-    if "stock_name" not in st.session_state:
-        st.session_state.stock_name = ""
+    profile = get_profile(symbol)
+    if not profile["resolved"]:
+        st.error(f"'{symbol}' did not resolve on NSE. Check the symbol.")
+        return
 
-    if "stock_price" not in st.session_state:
-        st.session_state.stock_price = 0.0
+    price = get_price(symbol)
+    c1, c2 = st.columns(2)
+    c1.text_input("Name", value=profile["name"], disabled=True)
+    c2.text_input("Sector", value=profile["sector"], disabled=True)
+    st.metric("Live Price", f"₹{price:,.2f}" if price else "unavailable")
 
-    if "valid_stock" not in st.session_state:
-        st.session_state.valid_stock = False
+    existing = {str(s.get("ticker", "")).upper()
+                for s in (cached_stocks() or {}).values()}
+    if profile["ticker"] in existing or display_symbol(profile["ticker"]) in existing:
+        st.info("Already in the catalog.")
+        return
 
-    if "stock_sector" not in st.session_state:
-        st.session_state.stock_sector = "Unknown"
-
-
-    stock_ticker = st.text_input("Stock Symbol").strip().upper()
-
-    if st.button("Fetch Stock Info"):
-        if not stock_ticker:
-            st.warning("Enter a stock symbol first")
-        if len(stock_ticker) < 3:
-            st.warning("Enter a valid stock ticker")
-        else:
-            data = fetch_stock_data(stock_ticker)
-            if data and "name" in data:
-                name = data.get("name", stock_ticker.upper())
-                price = round(float(data.get("price", 0) or 0), 2)
-
-                st.session_state.stock_name = name
-                st.session_state.stock_price = price
-                st.session_state.stock_sector = str(data.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
-                st.session_state.valid_stock = True
-
-                if price > 0:
-                    st.success(f"{name} | Live Price: ₹{price}")
-                else:
-                    st.warning("Live price unavailable right now. You can still add this stock and price will load later.")
-
-            else:
-                st.session_state.stock_name = stock_ticker
-                st.session_state.stock_price = 0.0
-                st.session_state.stock_sector = "Unknown"
-                st.session_state.valid_stock = True
-                st.warning("Live price unavailable right now. You can still add this stock and price will load later.")
-
-    # Locked fields
-    st.text_input(
-        "Stock Name",
-        value=st.session_state.stock_name,
-        disabled=True
-    )
-
-    sector = st.text_input(
-        "Sector",
-        value=st.session_state.stock_sector,
-        placeholder="e.g., IT, Banking, Pharma"
-    ).strip() or "Unknown"
-
-    st.number_input(
-        "Stock Price",
-        value=float(st.session_state.stock_price),
-        format="%.2f",
-        disabled=True
-    )
-
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        if st.button("Add Stock", disabled=not st.session_state.valid_stock):
-
-            if add_stock_to_db(
-                st.session_state.stock_name,
-                stock_ticker,
-                st.session_state.stock_price,
-                sector
-            ):
-                st.toast("Stock added successfully")
-                # Clear cached values
-                st.session_state.stock_name = ""
-                st.session_state.stock_price = 0.0
-                st.session_state.stock_sector = "Unknown"
-                st.session_state.valid_stock = False
-                st.session_state["page"] = "manager_home"
-                st.rerun()
-            else:
-                st.error("Failed to add stock")
-
-    with col2:
-
-        if st.button("Back to Home", key="add_stock_back_bottom"):
-
-            st.session_state["page"] = "manager_home"
+    if st.button("Add to catalog", type="primary"):
+        # Price is deliberately not stored -- it is stale the moment it is written.
+        if add_stock_to_db(profile["name"], profile["ticker"], 0.0, profile["sector"]):
+            cached_stocks.clear()
+            st.success(f"Added {profile['name']}")
+            st.session_state["page"] = "show_stocks"
             st.rerun()
+        st.error("Failed to add stock.")
 
 
 if __name__ == "__main__":

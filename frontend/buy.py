@@ -1,7 +1,7 @@
 import streamlit as st
 from services.cache import cached_stocks, cached_portfolio
 from database.curd import add_purchase_to_db
-from services.stock_services import fetch_stock_data
+from services.stock_services import get_prices, normalize_ticker, display_symbol
 
 
 def _clean_ticker(ticker):
@@ -39,14 +39,13 @@ def buy():
         return
 
     tickers = [_clean_ticker(v.get("ticker", "")) for v in active_stocks.values()]
-    market_meta = fetch_stock_data(tickers) if tickers else {}
-    name_map = (market_meta or {}).get("name_map", {})
+    prices = get_prices(tickers) if tickers else {}
 
     display_to_id = {}
     for sid, stock in active_stocks.items():
         ticker = _clean_ticker(stock.get("ticker", ""))
         fallback_name = str(stock.get("name", "") or "").strip()
-        resolved_name = str(name_map.get(ticker, fallback_name)).strip() or fallback_name or ticker.replace(".NS", "")
+        resolved_name = fallback_name or display_symbol(ticker)
         display_to_id[f"{resolved_name} ({ticker.replace('.NS', '')})"] = sid
 
     company_names = sorted(display_to_id.keys())
@@ -74,11 +73,8 @@ def buy():
 
     ticker = str(selected_stock["ticker"]).strip().upper()
     stock_id = selected_stock["stock_id"]
-    company_name = str(name_map.get(ticker, selected_stock.get("name", ""))).strip() or ticker.replace(".NS", "")
-    # fetch live price
-    data = fetch_stock_data([ticker])
-    ticker_ns = ticker if ticker.endswith(".NS") else ticker + ".NS"
-    live_price = round((data or {}).get(ticker_ns, (data or {}).get("price", 0)) or 0, 2)
+    company_name = str(selected_stock.get("name", "")).strip() or display_symbol(ticker)
+    live_price = round(prices.get(normalize_ticker(ticker), 0) or 0, 2)
     fallback_price = round(float(selected_stock.get("price", 0) or 0), 2)
     price = live_price or fallback_price
 

@@ -1,39 +1,23 @@
-# Python cache
-
-**pycache**/
+.claude/
+.env
+.streamlit/secrets.toml
+*firebase-adminsdk*.json
+backup_firebase_*.json
+__pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual environments
-
+build/
+dist/
+*.egg-info/
 venv/
 env/
 ENV/
 .venv/
-
-# Environment variables
-
-.env
-
-# Jupyter Notebook checkpoints
-
 .ipynb_checkpoints/
-
-# Python build files
-
-build/
-dist/
-*.egg-info/
-
-# IDE files
-
+portfolio_comparison.png
 .vscode/
 .idea/
-
-# OS files
-
 .DS_Store
 Thumbs.db
-
-*.png
-*.json
+*.docx
+*.pdf

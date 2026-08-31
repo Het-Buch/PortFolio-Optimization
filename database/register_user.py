@@ -6,37 +6,14 @@ import requests
 # Initialize Firebase connection
 from database.connection import initialize_firebase
 
-initialize_firebase()
+try:  # real init happens in main.py; never fail at import
+    initialize_firebase()
+except Exception:
+    pass
 
 def generate_user_id():
-    try:
-        # Get the last two digits of the current year
-        year_suffix = datetime.now().year % 100  # Example: 2024 → 24
-
-        # Reference to the database path
-        ref = db.reference("users")
-
-        if not ref.get():
-            ref.set({})
-
-        # Fetch all users ordered by user_id
-        users = ref.get()
-
-        if users:
-            last_user_id = max(users.keys())  
-            last_number = int(last_user_id[3:])
-        else:
-            last_number = 0  # Start from 1 if no users exist
-
-        # Generate new user ID
-        new_number = last_number + 1
-        user_id = f"{year_suffix}u{new_number:07d}"  # Format: 24u0000001
-
-        return user_id
-
-    except Exception as e:
-        print(f"Error generating user ID: {e}")
-        return None
+    n = db.reference("counters/users").transaction(lambda cur: (cur or 0) + 1)
+    return f"{datetime.now().year % 100}u{int(n):07d}"
     
 def email_verification(email):
     try:

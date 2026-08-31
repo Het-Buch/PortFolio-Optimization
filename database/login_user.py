@@ -7,7 +7,10 @@ from database.connection import initialize_firebase
 from dotenv import load_dotenv
 import os
 # Ensure Firebase is initialized
-initialize_firebase()
+try:  # real init happens in main.py; never fail at import
+    initialize_firebase()
+except Exception:
+    pass
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 

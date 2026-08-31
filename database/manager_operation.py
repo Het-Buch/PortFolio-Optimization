@@ -4,40 +4,16 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 
-initialize_firebase()
+try:  # real init happens in main.py; never fail at import
+    initialize_firebase()
+except Exception:
+    pass
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 
 def generate_stock_id():
-    try:
-        # Reference to the database path
-        ref = db.reference("stocks")
-
-        # Check if the "stocks" reference exists, if not, create it
-        if not ref.get():
-            ref.set({})
-
-        # Fetch all stocks ordered by stock_id
-        stocks = ref.get()
-
-        if stocks:
-            last_stock_id = max(stocks.keys())  
-            last_number = int(last_stock_id[3:])
-        else:
-            last_number = 0  # Start from 1 if no stocks exist
-
-        # Generate new stock ID
-        new_number = last_number + 1
-
-        year_suffix = datetime.now().year % 100 
-
-        stock_id = f"{year_suffix}s{new_number:07d}"  # Format: 24s0000001
-
-        return stock_id
-
-    except Exception as e:
-        print(f"Error generating stock ID: {e}")
-        return None
+    n = db.reference("counters/stocks").transaction(lambda cur: (cur or 0) + 1)
+    return f"{datetime.now().year % 100}s{int(n):07d}"
 
 def stock_exists(stock_ticker):
     try:
@@ -98,6 +74,7 @@ def get_all_stocks_from_db():
         if not stocks:
             return {}
 
+        stocks = {k: v for k, v in stocks.items() if not (v or {}).get("is_deleted", False)}
         for stock in stocks.values():
             stock["sector"] = str(stock.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
 
@@ -161,7 +138,7 @@ def get_user_purchases_over_time():
             for purchase in purhcase.values():
                 save={}
                 save["company_name"]=purchase.get("company_name")
-                save["purchase_date"]=purchase.get("purchase_date")
+                save["purchase_date"]=purchase.get("purchased_on")
                 save["quantity"]=purchase.get("quantity")
                 purchase_data.append(save)
             

@@ -1,161 +1,123 @@
-import requests
+"""Market data: the only yfinance caller. Batched downloads; .info on catalog writes only."""
+
+import logging
+
+import pandas as pd
 import streamlit as st
-import yfinance as yf
 
-BASE_URL = "https://query1.finance.yahoo.com/v7/finance/quote?symbols="
+logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+UNKNOWN_SECTOR = "Unknown"
+_MISSING = {"", "none", "null", "nan", "n/a", "na", "unknown"}
 
 
-def _normalize_sector(sector):
-    text = str(sector or "").strip()
-    if not text or text.lower() in {"none", "null", "nan", "n/a", "na", "unknown"}:
-        return "Unknown"
-    return text
-
-
-def _normalize_ticker(ticker):
-    ticker = str(ticker).strip().upper()
-    if not ticker:
+def normalize_ticker(ticker):
+    """Uppercase + ensure .NS suffix. Returns '' for empty input."""
+    t = str(ticker or "").strip().upper()
+    if not t:
         return ""
-    return ticker if ticker.endswith(".NS") else f"{ticker}.NS"
+    return t if t.endswith(".NS") else f"{t}.NS"
 
 
-def _fetch_from_yahoo_quote_api(tickers):
-    query = ",".join(tickers)
-    url = BASE_URL + query
+def display_symbol(ticker):
+    return str(ticker or "").strip().upper().replace(".NS", "")
 
-    r = requests.get(url, headers=HEADERS, timeout=5)
-    if r.status_code != 200:
-        return {}, {}
 
+def normalize_sector(sector):
+    text = str(sector or "").strip()
+    return UNKNOWN_SECTOR if text.lower() in _MISSING else text
+
+
+def _key(tickers):
+    """Normalize, dedupe, sort. Sorting makes the cache key order-independent."""
+    if isinstance(tickers, str):
+        tickers = [tickers]
+    return tuple(sorted({normalize_ticker(t) for t in (tickers or [])} - {""}))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _download(symbols, period):
+    if not symbols:
+        return pd.DataFrame()
+    import yfinance as yf  # lazy: ~1s import, not needed to render a page
     try:
-        data = r.json()
-    except Exception:
-        return {}, {}
-
-    results = data.get("quoteResponse", {}).get("result", [])
-
-    prices = {}
-    names = {}
-
-    for item in results:
-        symbol = str(item.get("symbol", "")).upper()
-        price = item.get("regularMarketPrice")
-        if price is None:
-            price = item.get("postMarketPrice")
-        if price is None:
-            price = item.get("preMarketPrice")
-        if price is None:
-            price = item.get("previousClose")
-        name = item.get("longName") or item.get("shortName") or symbol.replace(".NS", "")
-
-        if symbol:
-            names[symbol] = name
-            if price is not None:
-                prices[symbol] = float(price)
-
-    return prices, names
-
-
-def _fetch_from_yfinance(tickers):
-    prices = {}
-    names = {}
-    sectors = {}
-
-    for symbol in tickers:
-        try:
-            ticker_obj = yf.Ticker(symbol)
-            fast_info = getattr(ticker_obj, "fast_info", {}) or {}
-
-            price = (
-                fast_info.get("lastPrice")
-                or fast_info.get("regularMarketPrice")
-                or fast_info.get("previousClose")
-            )
-            if price is None:
-                info = getattr(ticker_obj, "info", {}) or {}
-                price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
-
-            if price is None:
-                history = ticker_obj.history(period="5d", auto_adjust=False)
-                if not history.empty and "Close" in history.columns:
-                    price = float(history["Close"].iloc[-1])
-
-            info = getattr(ticker_obj, "info", {}) or {}
-            name = info.get("longName") or info.get("shortName") or symbol.replace(".NS", "")
-            sector = _normalize_sector(info.get("sector"))
-
-            names[symbol] = name
-            sectors[symbol] = sector
-
-            if price is not None:
-                prices[symbol] = float(price)
-        except Exception:
-            continue
-
-    return prices, names, sectors
-
-@st.cache_data(ttl=120)
-def fetch_stock_data(tickers):
-    """
-    Fetch live stock prices for NSE symbols.
-    Returns symbol->price mapping and, for single ticker calls,
-    includes "price", "name", and "symbol" keys for UI compatibility.
-    """
-
-    try:
-
-        if isinstance(tickers, str):
-            tickers = [tickers]
-
-        normalized_tickers = [_normalize_ticker(t) for t in tickers]
-        normalized_tickers = [t for t in normalized_tickers if t]
-
-        if not normalized_tickers:
-            return {}
-
-        # preserve order, remove duplicates
-        normalized_tickers = list(dict.fromkeys(normalized_tickers))
-
-        prices, names = _fetch_from_yahoo_quote_api(normalized_tickers)
-
-        sectors = {}
-
-        missing = [t for t in normalized_tickers if t not in prices]
-        if missing:
-            fallback_prices, fallback_names, fallback_sectors = _fetch_from_yfinance(missing)
-            prices.update(fallback_prices)
-            names.update(fallback_names)
-            sectors.update(fallback_sectors)
-
-        response = {k: float(v) for k, v in prices.items()}
-        response["name_map"] = names
-        response["sector_map"] = sectors
-
-        if len(normalized_tickers) == 1:
-            symbol = normalized_tickers[0]
-
-            # For add/edit flows we need sector metadata even when quote API already returned price.
-            sector_now = _normalize_sector(sectors.get(symbol, "Unknown"))
-            if sector_now == "Unknown":
-                extra_prices, extra_names, extra_sectors = _fetch_from_yfinance([symbol])
-                prices.update(extra_prices)
-                names.update(extra_names)
-                sectors.update(extra_sectors)
-
-            response["symbol"] = symbol
-            response["price"] = float(prices.get(symbol, 0) or 0)
-            response["name"] = names.get(symbol, symbol.replace(".NS", ""))
-            response["sector"] = _normalize_sector(sectors.get(symbol, "Unknown"))
-
-        if not response:
-            return {}
-
-        return response
-
+        raw = yf.download(list(symbols), period=period, auto_adjust=True,
+                          progress=False, threads=False)
     except Exception as e:
-        print("Stock fetch error:", e)
-        return {}
+        logger.warning("download failed %s: %s", symbols, e)
+        return pd.DataFrame()
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+
+    # yfinance gives MultiIndex columns for many tickers, flat for one.
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Close" not in raw.columns.get_level_values(0):
+            return pd.DataFrame()
+        close = raw["Close"]
+    else:
+        if "Close" not in raw.columns:
+            return pd.DataFrame()
+        close = raw[["Close"]]
+        close.columns = [symbols[0]]
+    return close.dropna(how="all")
+
+
+def get_history(tickers, period="2y"):
+    """DataFrame of adjusted closes, one column per ticker. One HTTP call."""
+    symbols = _key(tickers)
+    if not symbols:
+        return pd.DataFrame()
+    hist = _download(symbols, period)
+    if hist.empty:
+        return hist
+    cols = [t for t in symbols if t in hist.columns]
+    return hist[cols] if cols else pd.DataFrame()
+
+
+def get_prices(tickers):
+    """{ticker: last_close}. Missing tickers are absent; never raises."""
+    hist = get_history(tickers, period="5d")
+    out = {}
+    for sym in hist.columns:
+        s = hist[sym].dropna()
+        if not s.empty:
+            out[sym] = float(s.iloc[-1])
+    return out
+
+
+def get_price(ticker):
+    sym = normalize_ticker(ticker)
+    return float(get_prices([sym]).get(sym, 0.0)) if sym else 0.0
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_profile(ticker):
+    """Name + sector for one ticker. Uses .info -- catalog writes only.
+
+    resolved=False means the ticker could not be confirmed; callers should treat
+    that as validation failure, not a reason to store placeholder data.
+    """
+    sym = normalize_ticker(ticker)
+    miss = {"ticker": sym, "name": display_symbol(sym),
+            "sector": UNKNOWN_SECTOR, "resolved": False}
+    if not sym:
+        return miss
+    import yfinance as yf
+    try:
+        info = yf.Ticker(sym).info or {}
+    except Exception as e:
+        logger.warning("profile failed %s: %s", sym, e)
+        return miss
+
+    name = str(info.get("longName") or info.get("shortName") or "").strip()
+    if not name:
+        return miss
+    return {"ticker": sym, "name": name,
+            "sector": normalize_sector(info.get("sector")), "resolved": True}
+
+
+def ticker_exists(ticker):
+    """True when the symbol returns real price data. The only check worth doing --
+    length/charset rules reject valid symbols and accept invented ones."""
+    sym = normalize_ticker(ticker)
+    return bool(sym) and not get_history([sym], period="5d").empty

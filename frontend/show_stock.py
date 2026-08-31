@@ -3,8 +3,11 @@ import pandas as pd
 
 from services.cache import cached_stocks
 from database.manager_operation import delete_stock_from_db
+from frontend.manger_home import require_manager
 
 def show_stocks():
+    if not require_manager():
+        return
 
     st.title("Stocks List")
 

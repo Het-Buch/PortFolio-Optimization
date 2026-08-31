@@ -1,223 +1,32 @@
-# import streamlit as st
-# from ml.optimization import optimize_portfolio
-# from database.curd import get_purchased_stocks
-# import pandas as pd
-# # from fpdf import FPDF
-# import os
+"""Optimization page. Weights render from NumPy first; the council streams after."""
 
-# def optimize():
-
-#     result=None
-#     fig=None
-#     analysis=None
-
-#     if "user" not in st.session_state:
-#         st.warning("You are not logged in. Please login first.")
-#         st.session_state["page"] = "login"
-#         del st.session_state["user"]
-#         st.rerun()
-    
-        
-
-#     if st.session_state.page == "optimize":
-#         st.title("Portfolio Optimization")
-
-#         # Fetch user details
-#         user_id = st.session_state["user"]
-
-#         # st.write(user_id)
-
-#         # Fetch purchased stocks for the user
-#         purchased_stocks = get_purchased_stocks(user_id)
-#         if purchased_stocks:
-#             stock_data = []
-#             save_data = {}
-#             for stock in purchased_stocks.values():
-#                 if stock["sold"]==False:
-#                     save={}
-#                     save["company"]=str(stock["company_name"])
-#                     save["ticker"]=str(stock["ticker"])
-#                     save["stocks_owned"]=int(stock["quantity"])
-
-#                     # save_data["portfolio"]=save
-#                     stock_data.append(save)
-                    
-
-                    
-#                     # stock_data.append([stock["company_name"], stock["quantity"], stock["price_per_stock"], stock["total_cost"]])
-                        
-#             # Display the purchased stocks in a table
-
-#             if stock_data:
-
-#                 st.subheader("Your Purchased Stocks")
-
-#                 send_data = {}
-#                 send_data["user"]=str(user_id)
-#                 send_data["portfolio"]=stock_data
-
-#                 # st.write(send_data)
-
-
-#                 # st.write(portfolio_data)
-                
-#                 # st.write(send_data['user'])
-#                 df = pd.DataFrame(
-#                     [
-#                         {
-#                             "Company Name": stock["company_name"],
-#                             "Quantity": stock["quantity"],
-#                             "Price_per_stock": stock["price_per_stock"],
-#                             "Total Cost": stock["total_cost"],
-#                         }
-#                         for stock in purchased_stocks.values() if not stock["sold"]
-#                     ]
-#                 )
-                
-                
-#                 st.table(df)
-
-#         else:
-#             st.warning("No stocks purchased yet.")
-
-        
-
-#         if st.button("Optimize Portfolio"):
-
-#             # st.session_state['content'] = False
-#             st.session_state['pdf'] = None
-#             result, fig = optimize_portfolio(send_data)
-#             st.success("Portfolio optimized successfully!")
-            
-#             st.pyplot(fig)
-            
-#             # session is needed because page is refreshed so we need to store the result in session state
-#             st.session_state['analysis'] = result["ai_analysis"]["overall_analysis"]
-            
-#             # st.write(result['ai_analysis']['company_specific_analysis'].keys()) 
-#             st.session_state['company specific analysis'] = result["ai_analysis"]["company_specific_analysis"]
-#             # st.session_state['content'] = True
-#             st.session_state['pdf'] = result["ai_analysis"]["overall_analysis"]
-
-#         if st.session_state.get("analysis"):
-#             # clear=False
-#             if st.button("Generate Report"):
-#                 st.write("Analysis:", st.session_state.get("analysis"))
-#                 # clear=st.button("Clear Analysis")
-#                 del st.session_state['analysis']
-
-        
-#         if st.session_state.get("company specific analysis"):
-#             if st.button("Generate Company Specific Report"):
-#                 st.subheader("Company Specific Analysis")
-#                 company_specific_analysis = st.session_state.get("company specific analysis")
-
-#                 for company, analysis in company_specific_analysis.items():
-#                     st.write(f"**Company: {company}**")
-#                     st.write("Analysis:", analysis)
-
-#                 del st.session_state['company specific analysis']
-#                     # clear=st.button("Clear Analysis")
-#                     # if clear:
-
-            
-
-#         # if st.session_state.get("pdf"):
-#         #     if st.button("Generate PDF"):
-#         #         analysis = st.session_state.get("pdf")
-#         #         if analysis:
-#         #             pdf = FPDF()
-#         #             pdf.add_page()
-#         #             pdf.set_font("Arial", style="B", size=12)
-#         #             pdf.cell(200, 10, txt="Portfolio Optimization Report", ln=True, align="C")
-#         #             pdf.ln(10)
-#         #             pdf.multi_cell(0, 10, txt=analysis)
-
-#         #             pdf_file_path = os.path.join(os.getcwd(), "Portfolio_Optimization_Report.pdf")
-#         #             pdf.output(pdf_file_path)
-
-#         #             with open(pdf_file_path, "rb") as pdf_file:
-#         #                 st.write("Your download will start shortly...")
-#         #                 pdf_data = pdf_file.read()
-#         #                 st.write("Download your report:")
-#         #                 st.download_button(
-#         #                     label="click to download",
-#         #                     data=pdf_data,
-#         #                     file_name="Portfolio_Optimization_Report.pdf",
-#         #                     mime="application/pdf"
-#         #                 )
-
-#         #             os.remove(pdf_file_path)
-
-#         #             del st.session_state['pdf']
-
-
-        
-
-#         if st.button("Home"):
-#             st.session_state["page"] = "home"
-#             st.rerun()
-   
-
-
-# if __name__ == "__main__":
-#     optimize()
-
-import streamlit as st
+import numpy as np
 import pandas as pd
+import streamlit as st
 
-from ml.optimization import optimize_portfolio
+from ml.optimization import optimize_portfolio, rebalance_orders
+from ml.optimizers import ALGORITHMS
 from services.cache import cached_portfolio
-from services.stock_services import fetch_stock_data
+from services.stock_services import get_prices, normalize_ticker, display_symbol
 
 
-def _display_name(name_or_ticker):
-    return str(name_or_ticker or "").replace(".NS", "").strip()
-
-
-def _looks_like_ticker_name(value):
-    text = str(value or "").strip().upper()
-    if not text:
-        return True
-    if text.endswith(".NS"):
-        return True
-    return all(ch.isalnum() or ch in {".", "-", "&"} for ch in text) and len(text) <= 15
-
-
-def _resolved_company_name(raw_name, ticker, name_map):
-    key = str(ticker or "").strip().upper()
-    raw = str(raw_name or "").strip()
-    fetched = str((name_map or {}).get(key, "")).strip()
-    if fetched and (_looks_like_ticker_name(raw) or not raw):
-        return fetched
-    return raw or fetched or _display_name(key)
-
-
-def _aggregate_holdings(active_stocks):
-    """Combine multiple purchase entries for the same ticker into one holding."""
-    aggregated = {}
-
-    for s in active_stocks:
-        ticker = str(s.get("ticker", "")).strip().upper()
-        ticker = ticker if ticker.endswith(".NS") else (ticker + ".NS" if ticker else "")
+def _holdings(active):
+    """Collapse repeat purchases of the same ticker into one position."""
+    out = {}
+    for s in active:
+        ticker = normalize_ticker(s.get("ticker"))
         if not ticker:
             continue
+        row = out.setdefault(ticker, {
+            "company": s.get("company_name") or display_symbol(ticker),
+            "ticker": ticker, "quantity": 0, "total_cost": 0.0,
+        })
+        row["quantity"] += int(s.get("quantity", 0) or 0)
+        row["total_cost"] += float(s.get("total_cost", 0) or 0)
+    return list(out.values())
 
-        if ticker not in aggregated:
-            aggregated[ticker] = {
-                "company_name": _display_name(s.get("company_name", ticker.replace(".NS", ""))),
-                "ticker": ticker,
-                "quantity": 0,
-                "total_cost": 0.0,
-            }
-
-        aggregated[ticker]["quantity"] += int(s.get("quantity", 0) or 0)
-        aggregated[ticker]["total_cost"] += float(s.get("total_cost", 0) or 0)
-
-    return list(aggregated.values())
 
 def optimize():
-
     if "user" not in st.session_state:
         st.warning("Please login first.")
         st.session_state["page"] = "login"
@@ -226,160 +35,126 @@ def optimize():
 
     st.title("Portfolio Optimization")
 
-    if st.button("Back to Home"):
-        st.session_state["page"] = "home"
-        st.rerun()
-
-    user_id = st.session_state["user"]
-
-    purchased_stocks = cached_portfolio(user_id)
-
-    if not purchased_stocks:
-        st.warning("No stocks purchased yet.")
-        return
-
-    active_stocks = [
-        s for s in purchased_stocks.values() if not s.get("sold", False)
-    ]
-
-    if not active_stocks:
+    purchased = cached_portfolio(st.session_state["user"]) or {}
+    active = [s for s in purchased.values() if not s.get("sold", False)]
+    if not active:
         st.warning("No active stocks in portfolio.")
         return
 
-    # Portfolio display (deduplicated by ticker)
-    holdings = _aggregate_holdings(active_stocks)
+    holdings = _holdings(active)
+    prices = get_prices([h["ticker"] for h in holdings])
 
-    if not holdings:
-        st.warning("No valid holdings available for optimization.")
-        return
-
-    table_rows = []
-    ticker_list = [str(s.get("ticker", "")).strip().upper() for s in holdings if str(s.get("ticker", "")).strip()]
-    market_meta = fetch_stock_data(ticker_list) if ticker_list else {}
-    name_map = (market_meta or {}).get("name_map", {})
-
-    for s in holdings:
-        quantity = int(s.get("quantity", 0) or 0)
-        total_cost = float(s.get("total_cost", 0) or 0)
-
-        ticker = str(s.get("ticker", "")).strip().upper()
-        ticker_ns = ticker if ticker.endswith(".NS") else (ticker + ".NS" if ticker else "")
-
-        live_price = 0.0
-        if ticker_ns:
-            live_price = float((market_meta or {}).get(ticker_ns, 0) or 0)
-
-        stored_price = float(s.get("price_per_stock", 0) or 0)
-        derived_price = (total_cost / quantity) if quantity > 0 else 0
-        display_price = round(live_price or stored_price or derived_price, 2)
-
-        table_rows.append({
-            "Company": _resolved_company_name(s.get("company_name", ""), ticker_ns, name_map),
-            "Quantity": quantity,
-            "Price": display_price,
-            "Total Cost": round(total_cost, 2),
-        })
-
-        s["position_value"] = float(quantity * display_price)
-
-    df = pd.DataFrame(table_rows)
-
-    df.index = df.index + 1
+    for h in holdings:
+        live = prices.get(h["ticker"], 0.0)
+        avg = h["total_cost"] / h["quantity"] if h["quantity"] else 0.0
+        h["price"] = live or avg
+        h["position_value"] = h["quantity"] * h["price"]
 
     st.subheader("Your Portfolio")
-    st.dataframe(df, width='stretch')
+    st.dataframe(pd.DataFrame([{
+        "Company": h["company"], "Quantity": h["quantity"],
+        "Price": round(h["price"], 2), "Value": round(h["position_value"], 2),
+    } for h in holdings]), width="stretch", hide_index=True)
 
-    send_data = {
-        "user": user_id,
-        "portfolio": [
-            {
-                "company": _resolved_company_name(s.get("company_name", ""), s.get("ticker", ""), name_map),
-                "ticker": s["ticker"],
-                "stocks_owned": s["quantity"],
-                "position_value": float(s.get("position_value", 0) or 0),
-            }
-            for s in holdings
-        ]
-    }
+    algorithm = st.selectbox("Algorithm", list(ALGORITHMS), index=0)
+    compare_all = st.checkbox("Compare all algorithms", value=False)
 
-    use_ml_prediction = st.checkbox(
-        "Use ML prediction (slow, may rate limit)",
-        value=False,
-        help="When enabled, optimization trains per-stock models via yfinance history. Keep off for faster and more reliable runs.",
-    )
+    if st.button("Optimize", type="primary"):
+        with st.spinner("Optimizing..."):
+            st.session_state["opt"] = optimize_portfolio(
+                {"portfolio": [{"company": h["company"], "ticker": h["ticker"],
+                                "stocks_owned": h["quantity"],
+                                "position_value": h["position_value"]}
+                               for h in holdings]},
+                algorithm=algorithm, compare_all=compare_all)
+            st.session_state["holdings"] = {
+                h["ticker"]: {"quantity": h["quantity"], "company": h["company"]}
+                for h in holdings}
+            st.session_state["prices"] = {h["ticker"]: h["price"] for h in holdings}
+        st.session_state.pop("council", None)
 
-    use_ai_analysis = st.checkbox(
-        "Use AI narrative analysis (slow)",
-        value=False,
-        help="Calls external LLM APIs for explanation. Turn off for fastest reliable optimization results.",
-    )
+    result = st.session_state.get("opt")
+    if not result:
+        return
 
-    use_news_sentiment = st.checkbox(
-        "Use live news sentiment (slow)",
-        value=False,
-        help="Scrapes external news websites per company. Keep off to avoid delays/rate limits.",
-    )
+    if result is None:
+        st.error("No price history available for these holdings.")
+        return
 
-    company_count = len(send_data.get("portfolio", []))
-    quote_calls = 1  # batched quote fetch already performed above
-    yfinance_training_calls = company_count if use_ml_prediction else 0
-    ai_calls = (company_count + 1) if use_ai_analysis else 0  # overall + company-specific analysis
-    news_calls = company_count * 2 if use_news_sentiment else 0
+    _render(result)
 
-    if use_ml_prediction:
-        st.warning(
-            f"Estimated external load: quotes ~{quote_calls}, yfinance training ~{yfinance_training_calls}, AI calls ~{ai_calls}. "
-            "This mode may trigger provider rate limits."
-        )
-    else:
-        st.caption(
-            f"Estimated external load (fast mode): quotes ~{quote_calls}, yfinance training ~0, AI calls ~{ai_calls}, news scrapes ~{news_calls}."
-        )
 
-    if st.button("Optimize Portfolio"):
-        with st.spinner("Optimizing portfolio..."):
-            result, fig = optimize_portfolio(
-                send_data,
-                use_ai_analysis=use_ai_analysis,
-                use_market_agents=False,
-                use_ml_prediction=use_ml_prediction,
-                use_news_sentiment=use_news_sentiment,
-                preloaded_quotes=market_meta,
-            )
+def _render(result):
+    metrics = result["portfolio_metrics"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Expected Return", f"{metrics['expected_return']:.2%}")
+    c2.metric("Risk", f"{metrics['portfolio_risk']:.2%}")
+    c3.metric("Sharpe", f"{metrics['sharpe_ratio']:.2f}")
 
-        if result is None or fig is None:
-            st.error("Stock data unavailable due to rate limit. Please try again in a few minutes.")
-            return
+    initial = result["initial_weights"]
+    optimized = result["portfolio_weights"]
+    st.subheader("Suggested Allocation")
+    st.dataframe(pd.DataFrame([{
+        "Company": name,
+        "Current": f"{initial.get(name, 0):.1%}",
+        "Suggested": f"{w:.1%}",
+        "Change": f"{w - initial.get(name, 0):+.1%}",
+        "Action": "BUY" if w > initial.get(name, 0) + 0.01
+                  else ("SELL" if w < initial.get(name, 0) - 0.01 else "HOLD"),
+    } for name, w in optimized.items()]), width="stretch", hide_index=True)
 
-        st.session_state["result"] = result
-        st.session_state["fig"] = fig
+    orders, leftover = rebalance_orders(
+        {t_: w for t_, w in zip(result["tickers_ns"], optimized.values())},
+        st.session_state.get("holdings", {}), st.session_state.get("prices", {}))
 
-        ai_analysis = result.get("ai_analysis") or {}
-        st.session_state["analysis"] = ai_analysis.get("overall_analysis", "AI analysis unavailable.")
-        st.session_state["company_analysis"] = ai_analysis.get("company_specific_analysis", {})
-    
-    if "fig" in st.session_state:
-        st.success("Portfolio optimized successfully!")
-        st.pyplot(st.session_state["fig"])
-        
-    if st.session_state.get("analysis"):
-        st.subheader("Overall Analysis")
-        if "api error" in str(st.session_state["analysis"]).lower() or "organization has been restricted" in str(st.session_state["analysis"]).lower():
-            st.warning("Live AI provider error detected. Showing fallback analysis.")
-        st.write(st.session_state["analysis"])
+    if orders:
+        st.subheader("What to actually do")
+        st.caption("Whole shares only — NSE does not trade fractions.")
+        st.dataframe(pd.DataFrame([{
+            "Company": o["company"],
+            "Hold": o["held"],
+            "Target": o["target"],
+            "Action": f"{o['action']} {abs(o['delta'])}" if o["delta"] else "HOLD",
+            "Price": round(o["price"], 2),
+            "Value": round(o["value"], 2),
+            "Actual %": f"{o['actual_weight']:.1%}",
+        } for o in orders]), width="stretch", hide_index=True)
+        if leftover:
+            st.caption(f"Uninvested after whole-share rounding: ₹{leftover:,.2f}")
 
-    if st.session_state.get("company_analysis"):
+    risk = result.get("risk_metrics") or {}
+    if risk:
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Max Drawdown", f"{risk.get('max_drawdown', 0):.1%}")
+        r2.metric("VaR 95%", f"{risk.get('var_95', 0):.2%}")
+        r3.metric("Sortino", f"{risk.get('sortino', 0):.2f}")
 
-        st.subheader("Company Specific Analysis")
+    if result.get("comparison"):
+        st.subheader("Algorithm Comparison")
+        st.dataframe(pd.DataFrame([
+            {"Algorithm": k, "Sharpe": round(v["sharpe"], 3),
+             "Return": f"{v['expected_return']:.2%}", "Risk": f"{v['risk']:.2%}"}
+            for k, v in sorted(result["comparison"].items(),
+                               key=lambda kv: -kv[1]["sharpe"])
+        ]), width="stretch", hide_index=True)
 
-        for company, analysis in st.session_state["company_analysis"].items():
+    _council(result)
 
-            st.markdown(f"**{_display_name(company)}**")
-            st.write(analysis)
 
-    if st.button("Home"):
-        st.session_state["page"] = "home"
-        st.rerun()
+@st.fragment
+def _council(result):
+    """Fragment: rerunning the council must not re-run the optimizer above it."""
+    st.subheader("Council Analysis")
+
+    if st.button("Convene council"):
+        from ml.council import run
+        tickers = result["tickers"]
+        base = np.array(list(result["portfolio_weights"].values()))
+        try:
+            st.write_stream(run(tickers, base, stream=True))
+        except Exception as e:
+            st.error(f"Council unavailable: {e}")
+            st.caption("Weights above are unaffected — they come from the optimizer.")
 
 
 if __name__ == "__main__":
