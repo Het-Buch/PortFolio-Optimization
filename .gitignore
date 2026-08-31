@@ -1,4 +1,3 @@
-.notes/
 mlruns/
 .env
 .streamlit/secrets.toml
