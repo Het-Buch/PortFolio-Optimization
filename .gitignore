@@ -26,6 +26,5 @@ results/models/
 results/datasets/
 results/optuna/*.db
 _report.txt
-results/
 mlruns/
 mlflow.db
