@@ -1,101 +1,92 @@
-from flask import Flask, jsonify, request
+"""Financial news scraping + VADER sentiment."""
+
+import logging
+import re
+
 import requests
+import streamlit as st
 from bs4 import BeautifulSoup
-from ml.sentiment import analyze_sentiments, weighted_sentiment  # Import sentiment functions
 
-app = Flask(__name__)
+from ml.sentiment import analyze_sentiments, weighted_sentiment
 
-def get_mint():
-    url = 'https://www.livemint.com/news'
-    response = requests.get(url)    
+log = logging.getLogger(__name__)
 
-    if response.status_code != 200:
-        return {"error": "Failed to fetch the webpage"}
-    
-    html_content = response.content
-    soup = BeautifulSoup(html_content, 'html.parser')
-    headlines = soup.find_all('h2')
-    news_data = []
-    i = 0
+SOURCES = {
+    "mint": "https://www.livemint.com/news",
+    "moneycontrol": "https://www.moneycontrol.com/news/news-all",
+}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+NEUTRAL = 0.05
 
-    for h2 in headlines:
-        anchor = h2.find('a')
-        if anchor:
-            i = i + 1
-            headline_text = anchor.text.strip()
-            news_data.append({
-                "No.": i,
-                "headline": headline_text,
-                "source": "mint"
-            })
-    return news_data
+# Dropped when matching: they appear in almost every Indian listed-company name.
+_NOISE = {"limited", "ltd", "the", "india", "indian", "company", "corporation",
+          "corp", "inc", "industries", "enterprises", "&", "and", "of"}
 
-def get_money_control():
-    url = 'https://www.moneycontrol.com/news/news-all'
-    response = requests.get(url)
 
-    if response.status_code != 200:
-        return {"error": "Failed to fetch the webpage"}
+def _keywords(company, ticker=""):
+    """Match tokens for a company. Full legal names never appear in headlines."""
+    words = [w for w in re.split(r"[^\w&]+", str(company or "").lower()) if w]
+    core = [w for w in words if w not in _NOISE and len(w) > 2]
 
-    html_content = response.content
-    soup = BeautifulSoup(html_content, 'html.parser')
-    headlines = soup.find_all('h2')
-    news_data = []
-    i = 0
+    keys = set()
+    sym = str(ticker or "").upper().replace(".NS", "").strip()
+    if len(sym) > 2:
+        keys.add(sym.lower())
+    if core:
+        keys.add(core[0])              # "Tata Consultancy Services Ltd" -> "tata"
+        if len(core) >= 2:
+            keys.add(" ".join(core[:2]))  # ...and "tata consultancy"
+    return keys
 
-    for h2 in headlines:
-        anchor = h2.find('a')
-        if anchor:
-            i = i + 1
-            headline_text = anchor.text.strip()
-            news_data.append({
-                "No.": i,
-                "headline": headline_text,
-                "source": "moneycontrol"
-            })
-    return news_data
 
-def filter_data(company_name):
-    """Get filtered news and sentiment for a specific company."""
+@st.cache_data(ttl=1800, show_spinner=False)
+def _headlines():
+    """All headlines from both sources. Cached — every company reuses one scrape."""
+    out = []
+    for source, url in SOURCES.items():
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=6)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.content, "html.parser")
+            for h in soup.find_all(["h1", "h2", "h3"]):
+                a = h.find("a")
+                text = (a.text if a else h.text).strip()
+                if len(text) > 20:
+                    out.append({"headline": text, "source": source})
+        except Exception as e:
+            log.warning("scrape failed %s: %s", source, e)
+    return out
+
+
+def filter_data(company_name, ticker=""):
+    """Headlines mentioning the company, plus a weighted sentiment score."""
     if not company_name:
-        return {'error': 'company name is required'}
-    
-    mint_data = get_mint()
-    money_control_data = get_money_control()
-    merged_data = mint_data + money_control_data
-    
-    filtered_news = [
-        news for news in merged_data
-        if company_name.lower() in news['headline'].lower()
-    ]
-    
-    if filtered_news:
-        # Extract headlines for sentiment analysis
-        headlines = [news['headline'] for news in filtered_news]
-        # Analyze sentiments of the headlines
-        sentiments = analyze_sentiments(headlines)
-        # Compute the weighted sentiment score (using equal weights by default)
-        overall_sentiment = weighted_sentiment(sentiments)
-        # Return both the filtered news and the sentiment score
-        return {
-            "news": filtered_news,
-            "sentiment": overall_sentiment
-        }
-    else:
-        # Return a message and neutral sentiment score if no news is found
-        return {
-            "message": f"No news found for {company_name}",
-            "sentiment": 0.05  # Neutral sentiment score when no news is found
-        }
+        return {"error": "company name is required", "sentiment": NEUTRAL}
 
-@app.route('/')
-def hello_world():
-    return 'Hello, World!'
+    keys = _keywords(company_name, ticker)
+    if not keys:
+        return {"message": f"no usable keywords for {company_name}", "sentiment": NEUTRAL}
 
-@app.route('/get-news', methods=['GET'])
-def get_news():
-    company_name = request.args.get('company')
-    return jsonify(filter_data(company_name))
+    matched = [n for n in _headlines()
+               if any(k in n["headline"].lower() for k in keys)]
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    if not matched:
+        return {"message": f"No news found for {company_name}", "sentiment": NEUTRAL}
+
+    scores = analyze_sentiments([n["headline"] for n in matched])
+    return {"news": matched, "sentiment": weighted_sentiment(scores)}
+
+
+def _self_check():
+    k = _keywords("Tata Consultancy Services Limited", "TCS.NS")
+    assert "tcs" in k and "tata" in k and "tata consultancy" in k, k
+    assert "limited" not in k and "india" not in _keywords("India Cements Ltd"), k
+
+    heads = [{"headline": "TCS wins large cloud deal in Europe", "source": "mint"}]
+    assert any("tcs" in h["headline"].lower() for h in heads)
+    print("news: OK")
+
+
+if __name__ == "__main__":
+    _self_check()

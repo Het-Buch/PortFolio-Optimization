@@ -8,12 +8,11 @@ def load_pincode_data():
     return pd.read_csv("data/india_pincodes.csv", low_memory=False)
 
 
-df = load_pincode_data()
-
-
 def register():
 
     st.title("User Registration")
+
+    df = load_pincode_data()  # lazy: 23MB, must not load at import
 
     # ----------------------
     # Basic Information

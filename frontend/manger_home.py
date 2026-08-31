@@ -1,86 +1,76 @@
-import streamlit as st
+"""Manager dashboard: KPIs, growth, holdings, and recent activity."""
+
 import pandas as pd
+import streamlit as st
 
-from services.cache import cached_user_growth, cached_purchase_growth
+from services.cache import (cached_purchase_growth, cached_stocks,
+                            cached_user_growth, cached_users)
 
-def manager_home():
 
-    # Safety check
-    if "user" not in st.session_state or st.session_state["user"] != "manager":
+def require_manager():
+    """Shared guard. Every manager page calls this."""
+    if st.session_state.get("user") != "manager":
         st.session_state["page"] = "landing"
         st.rerun()
+        return False
+    return True
+
+
+def manager_home():
+    if not require_manager():
         return
 
     st.title("Manager Dashboard")
 
-    # Sidebar navigation
-    st.sidebar.title("Navigation")
+    users = cached_users() or {}
+    stocks = cached_stocks() or {}
+    purchases = cached_purchase_growth() or []
 
-    if st.sidebar.button("Home"):
-        st.session_state["page"] = "manager_home"
-        st.rerun()
+    blocked = sum(1 for u in users.values()
+                  if (u or {}).get("personal", {}).get("blocked"))
+    units = sum(int(p.get("quantity", 0) or 0) for p in purchases)
 
-    if st.sidebar.button("Add New Stock"):
-        st.session_state["page"] = "add_stock"
-        st.rerun()
-
-    if st.sidebar.button("Show Stocks"):
-        st.session_state["page"] = "show_stocks"
-        st.rerun()
-
-    if st.sidebar.button("Show Users"):
-        st.session_state["page"] = "show_users"
-        st.rerun()
-
-    if st.sidebar.button("Show Stock Sectors"):
-        st.session_state["page"] = "sector_manager"
-        st.rerun()
-
-    if st.sidebar.button("Logout"):
-        del st.session_state["user"]
-        st.session_state["page"] = "landing"
-        st.rerun()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Users", len(users), delta=f"-{blocked} blocked" if blocked else None)
+    c2.metric("Listed Stocks", len(stocks))
+    c3.metric("Purchases", len(purchases))
+    c4.metric("Units Held", f"{units:,}")
 
     st.divider()
+    left, right = st.columns(2)
 
-    # -------------------------
-    # User growth chart
-    # -------------------------
-    user_data = cached_user_growth()
+    with left:
+        st.subheader("User Growth")
+        growth = cached_user_growth() or []
+        dates = pd.to_datetime(
+            [g.get("first_login") for g in growth if g.get("first_login")],
+            errors="coerce").dropna()
+        if len(dates):
+            series = pd.Series(1, index=dates).resample("D").sum().cumsum()
+            st.area_chart(series, height=240)
+        else:
+            st.info("No signup history yet.")
 
-    st.subheader("📈 User Growth Over Time")
-
-    if user_data:
-
-        df = pd.DataFrame(user_data)
-        df["first_login"] = pd.to_datetime(df["first_login"])
-
-        login_counts = df.groupby(df["first_login"].dt.date).size()
-
-        st.line_chart(login_counts)
-
-    else:
-        st.info("No user data available.")
+    with right:
+        st.subheader("Top Holdings")
+        if purchases:
+            df = pd.DataFrame(purchases)
+            df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+            top = df.groupby("company_name")["quantity"].sum().nlargest(8)
+            st.bar_chart(top, height=240)
+        else:
+            st.info("No purchases yet.")
 
     st.divider()
-
-    # -------------------------
-    # Purchases chart
-    # -------------------------
-    purchase_data = cached_purchase_growth()
-
-    st.subheader("📊 Purchases by Company")
-
-    if purchase_data:
-
-        df = pd.DataFrame(purchase_data)
-
-        purchase_summary = df.groupby("company_name")["quantity"].sum()
-
-        st.bar_chart(purchase_summary)
-
+    st.subheader("Recent Purchases")
+    if purchases:
+        df = pd.DataFrame(purchases).rename(columns={
+            "company_name": "Company", "purchase_date": "Date", "quantity": "Qty"})
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.sort_values("Date", ascending=False, na_position="last").head(10)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
-        st.info("No purchase data available.")
+        st.info("Nothing to show.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+[server]
+headless = true
+fileWatcherType = "none"     # watching the 23MB data dir stalls startup
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+fastReruns = true            # cancel a rerun already superseded by a newer one
+magicEnabled = false         # skip AST rewrite that echoes bare expressions
+
+[client]
+showErrorDetails = "none"

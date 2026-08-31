@@ -1,7 +1,7 @@
 # 📈 Agentic AI for Smart Portfolio Management
 ### *A Fusion of ML and Nature-Inspired Algorithms*
 
-> An intelligent, end-to-end portfolio optimization system that combines **machine learning**, **nature-inspired metaheuristic algorithms**, and **Agentic AI** to deliver real-time, personalized investment recommendations. The system fetches 15 years of historical stock data from Yahoo Finance (Nifty50 & Sensex), engineers 25 technical indicators via TA-Lib, trains and compares 25 ML regression models using PyCaret, optimizes portfolio weights using PSO, GWO, and Bat Algorithm, analyses market sentiment from financial news, and uses two LangChain + Groq-powered autonomous agents — a Market Research Agent and a Portfolio Optimization Agent — to generate detailed, explainable rebalancing reports; all of this is wrapped in a Streamlit + Flask web-app with Firebase backend for secure user authentication, portfolio storage, and a manager dashboard.
+> An intelligent, end-to-end portfolio optimization system that combines **machine learning**, **nature-inspired metaheuristic algorithms**, and **Agentic AI** to deliver real-time, personalized investment recommendations. The system fetches 15 years of historical stock data from Yahoo Finance (Nifty50 & Sensex), engineers technical indicators via the `ta` library, predicts prices with a tuned Ridge model, optimizes portfolio weights using PSO, GWO, and the Bat Algorithm, analyses market sentiment from financial news, and runs a **five-agent council** (Bull, Bear, Quant, Macro, Chair) on Groq tool-calling that queries live data before arguing the allocation — with a deterministic validator holding final authority over the numbers. All of it is wrapped in a Streamlit web-app with a Firebase backend for authentication, portfolio storage, and a manager dashboard.
 
 ---
 
@@ -23,13 +23,16 @@
 | Feature | Description |
 |---|---|
 | 📊 **Real-Time Data** | Fetches live & historical stock data via yFinance |
-| 🤖 **ML Price Prediction** | Compares 25 regression models; selects best via PyCaret |
-| 🧠 **Agentic AI** | Two autonomous agents for market research & portfolio optimization |
-| 🐺 **Nature-Inspired Optimization** | PSO, GWO, Bat Algorithm — individual, hybrid & ensemble |
+| 🤖 **ML Price Prediction** | Ridge regression over 15y of engineered features |
+| 🧠 **Agent Council** | 5 agents debate in parallel; every claim must cite a tool result |
+| 🐺 **Nature-Inspired Optimization** | PSO, GWO, Bat — plus hybrids, ensemble, and an SLSQP baseline |
+| 🧾 **Actionable Orders** | Whole-share BUY/SELL counts, not unactionable percentages |
+| 🛡️ **Risk Metrics** | Ledoit-Wolf covariance, VaR, CVaR, max drawdown, Sortino, Calmar |
 | 📰 **Sentiment Analysis** | Scrapes Moneycontrol & Livemint; scores with VADER NLP |
 | 📋 **Detailed Reports** | Explainable rebalancing reports with risk/return justifications |
 | 🔐 **Secure Auth** | Firebase Authentication with role-based access (Investor / Manager) |
-| 🌐 **Web App** | Interactive Streamlit + Flask app, deployed on Streamlit Cloud |
+| 🌐 **Web App** | Interactive Streamlit app, deployed on Streamlit Cloud |
+| ⏱️ **Automation** | GitHub Actions cron: auto-sell on target, snapshots, price cache |
 
 ---
 
@@ -39,42 +42,68 @@
 Fetches **15 years** of OHLCV stock data (Jan 2010 → present) for **Nifty50 + Sensex** companies using `yFinance`. Financial news is scraped in real-time from Moneycontrol and Livemint via `BeautifulSoup`.
 
 ### 2. ⚙️ Data Preprocessing & Feature Engineering
-Raw OHLCV data is enriched with **25 technical indicators** using `TA-Lib`:
+Raw OHLCV data is enriched with technical indicators using the `ta` library:
 - Moving averages (SMA 10/30, EMA 10/30)
 - Momentum indicators (RSI, MACD)
 - Volatility bands (Bollinger Bands)
 - Lag features (Close_lag_1 to Close_lag_5)
 - Cyclical time encodings (sin/cos of day & month)
-- Stationarity checks via ADF Test
 
 ### 3. 📈 Stock Price Prediction (ML Models)
-`PyCaret` is used to simultaneously train and rank **25 ML regression algorithms**. Top performers (XGBoost, LightGBM, Gradient Boosting, Ridge Regression) are rebuilt with `Scikit-learn` and fine-tuned using `Optuna`. **Ridge Regression** achieved the lowest prediction error post-tuning.
+**Ridge Regression** (`Scikit-learn`, SVD solver) is trained per ticker on 15 years of engineered features and predicts the next close. Model selection across 25 candidates was carried out in the research notebooks; Ridge won on error and is what ships here.
 
 ### 4. 🌿 Portfolio Optimization (Nature-Inspired)
-Three nature-inspired algorithms optimize portfolio weight allocation by maximizing the **Sharpe Ratio** while minimizing risk:
-- **PSO** — Particle Swarm Optimization *(best balanced results)*
+Seven optimizers maximize the **Sharpe Ratio** over a real annualized covariance matrix (Ledoit-Wolf shrinkage), subject to long-only weights and a 35% position cap:
+- **PSO** — Particle Swarm Optimization
 - **GWO** — Grey Wolf Optimization
 - **BAT** — Bat Algorithm
-- Hybrid & Ensemble combinations (PSO→GWO, GWO→BAT, PSO+GWO, All Ensemble)
+- **SLSQP** — convex baseline, so the metaheuristics can be checked against a known optimum
+- Hybrids & Ensemble (PSO→GWO, GWO→BAT, All Ensemble)
+
+Because the position cap makes the objective non-smooth, the metaheuristics
+measurably outperform SLSQP — which is the point of using them.
+
+Output is converted to **whole-share orders**: NSE does not trade fractions, so
+"33.3%" becomes "BUY 3".
 
 ### 5. 🤖 Agentic AI
-Two intelligent agents powered by **LangChain + Groq**:
-- **Market Research Agent** — Continuously analyses real-time market conditions, news, sector trends, and risk factors
-- **Portfolio Optimization Agent** — Validates weight changes, explains rebalancing logic, and generates structured reports
+Five agents on **Groq native tool-calling** (no LangChain):
+- **Bull** — the constructive case: momentum, positive news, undervaluation
+- **Bear** — the cautionary case: volatility, drawdown, concentration
+- **Quant** — runs the optimizers and reports what the math says
+- **Macro** — sector and index exposure
+- **Chair** — synthesizes, names where the analysts disagreed, and how it resolved it
+
+The four analysts run **in parallel** and each may call tools (`get_quote`,
+`get_price_history`, `get_news_sentiment`, `run_optimizer`, `compare_algorithms`).
+A claim with no supporting tool output is discarded.
+
+**`council.validate()` is plain Python and holds final authority** — ±15% tilt cap,
+35% position cap, non-negativity, normalization. The council reasons about the
+allocation; the optimizer and the validator decide it. An LLM never emits a number
+that moves money.
 
 ### 6. 💬 Sentiment Analysis
 Financial news headlines are scored as **Positive / Negative / Neutral** using the `VADER` sentiment model. Sentiment scores are fed into the optimization pipeline to bias allocation decisions.
 
 ### 7. 🗄️ Database (Firebase)
-Firebase Realtime Database stores three collections — `users`, `stocks`, and `purchases` — in JSON format. Firebase Authentication handles secure login, registration, and role-based access control.
+Firebase Realtime Database stores `users`, `stocks`, `purchases`, `transactions`, plus `counters` (atomic ID generation), `sessions` (hashed tokens), `snapshots` and `price_cache`. Firebase Authentication handles login and registration; manager access is an **email allowlist**, and Google sign-in is available as an option.
 
-### 8. 🌐 Web Application (Streamlit + Flask)
+### 8. 🌐 Web Application (Streamlit)
 A fully interactive multi-page app covering:
 - Landing Page → Login / Register / Manager Login
 - User Home → Portfolio Overview, Buy/Sell/Edit Stocks
 - Optimization Page → Run algorithms, view pie charts & performance metrics
 - Report Generation → Detailed AI-generated portfolio analysis
-- Manager Dashboard → User management, stock listing, analytics
+- Manager Dashboard → KPIs, user growth, top holdings, recent activity
+
+Sessions persist for 30 minutes across page refresh; the cookie carries only an
+opaque token, with all state held server-side.
+
+### 9. ⏱️ Automation
+Streamlit Cloud has no scheduler, so a GitHub Actions cron runs after NSE close:
+target-price auto-sell, daily portfolio snapshots, and a price cache that keeps the
+interactive path off the rate limiter.
 
 ---
 
@@ -86,22 +115,19 @@ A fully interactive multi-page app covering:
 ### 🤖 Machine Learning & Data
 | Library | Purpose |
 |---|---|
-| `PyCaret` | Auto-training & comparing 25 ML models |
-| `Scikit-learn` | Model rebuilding, preprocessing, evaluation |
-| `XGBoost` / `LightGBM` | Gradient boosting regressors |
-| `Optuna` | Hyperparameter tuning |
-| `Pandas` / `NumPy` | Data manipulation & numerical computing |
-| `yFinance` | Real-time & historical stock data |
-| `TA-Lib` / `ta` | Technical indicator generation |
-| `Statsmodels` | ADF stationarity testing |
+| `Scikit-learn` | Ridge regression, Ledoit-Wolf shrinkage covariance |
+| `Pandas` / `NumPy` | Data manipulation; all optimizers are pure NumPy |
+| `yFinance` | Batched historical & live market data |
+| `ta` | Technical indicator generation |
 
 ### 🌿 Optimization & AI
 | Library | Purpose |
 |---|---|
-| `SciPy` | Mathematical optimization utilities |
-| `LangChain` | Agentic AI orchestration & LLM chaining |
-| `Groq` | High-speed LLM inference for agents |
-| `duckduckgo-search` | Web search tool for agents |
+| `SciPy` | SLSQP convex baseline |
+| `Groq` | Native tool-calling; fast inference for the agent council |
+
+PSO, GWO and the Bat Algorithm are implemented from scratch in NumPy
+(`ml/optimizers.py`) — no metaheuristics library.
 
 ### 💬 NLP & Sentiment
 | Library | Purpose |
@@ -114,14 +140,15 @@ A fully interactive multi-page app covering:
 | Library | Purpose |
 |---|---|
 | `Streamlit` | Interactive frontend web application |
-| `Flask` | Lightweight backend API server |
 | `firebase-admin` | Firebase database & authentication |
+| `Authlib` | Optional Google sign-in |
+| `extra-streamlit-components` | Session cookies that survive refresh |
 
 ### 📊 Visualization
 | Library | Purpose |
 |---|---|
-| `Matplotlib` | Static performance charts |
-| `Plotly` *(optional)* | Interactive portfolio visualizations |
+| `Matplotlib` | Allocation comparison charts |
+| `Plotly` | Interactive sector breakdowns |
 
 ---
 
@@ -163,23 +190,41 @@ portfolio-optimization/
 │   └── cleaned_top_companies.csv    # Company list for dropdowns
 │
 ├── ml/                              # 🤖 ML, AI & optimization logic
-│   ├── train.py                     # Model training pipeline (PyCaret + Scikit-learn)
-│   ├── model.py                     # Model loading & prediction
-│   ├── optimization.py              # PSO, GWO, BAT algorithms
-│   ├── agentic.py                   # LangChain agent definitions
-│   ├── market_agents.py             # Market Research Agent logic
+│   ├── optimizers.py                # PSO, GWO, BAT, hybrids, risk metrics (pure NumPy)
+│   ├── optimization.py              # Entry point; weights → whole-share orders
+│   ├── tools.py                     # Tool registry the agents call
+│   ├── council.py                   # 5-agent debate + deterministic validator
+│   ├── train.py                     # Ridge training pipeline
 │   ├── sentiment.py                 # VADER sentiment scoring
-│   ├── news.py                      # News scraping via BeautifulSoup
+│   ├── news.py                      # News scraping + relevance matching
 │   ├── visualization.py             # Charts & performance plots
-│   ├── report.md                    # Sample generated report
-│   └── .env                         # 🔐 API keys (Groq, etc.)
+│   └── .env                         # 🔐 GROQ_API_KEY
 │
 ├── services/                        # 🔧 Shared service utilities
 │   ├── cache.py                     # Data caching helpers
 │   └── stock_services.py            # Stock price fetching service
 │
+├── jobs/                            # ⏱️ Scheduled work
+│   ├── nightly.py                   # Auto-sell, snapshots, price cache
+│   └── seed_catalog.py              # One-shot catalog seed from CSV
+│
+├── .github/workflows/nightly.yml    # Cron: weekdays 16:00 IST
+├── .streamlit/config.toml           # Fast-start settings
+│
 └── utils/
     └── navigation.py                # Streamlit page navigation helper
+```
+
+Each module with non-trivial logic carries a self-check that needs no network and
+no credentials:
+
+```bash
+python -m ml.optimizers      # all 7 algorithms + risk metrics
+python -m ml.optimization    # weights + whole-share orders
+python -m ml.tools           # registry/schema consistency
+python -m ml.council         # validator bounds, stance parsing
+python -m ml.news            # keyword extraction
+python -m database.session   # token hashing
 ```
 
 ---
@@ -213,24 +258,60 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> ⚠️ **TA-Lib Note:** TA-Lib requires a compiled C library. Install it separately before `pip install ta-lib`:
-> - **Windows:** Download the `.whl` from [here](https://github.com/cgohlke/talib-build/releases) and run `pip install TA_Lib-*.whl`
-> - **macOS:** `brew install ta-lib`
-> - **Linux:** `sudo apt-get install libta-lib-dev`
+> All dependencies are pinned with both a floor and a ceiling. Leaving them open
+> previously caused pip to spend hours backtracking through the dependency tree.
 
-### Step 4 — Configure Environment Variables
+### Step 4 — Configure
 
-Create a `.env` file inside the `ml/` folder:
+Local development reads `.env`; deployment reads `st.secrets`; the scheduled job
+reads GitHub Actions secrets. The same keys work in all three.
+
+`ml/.env`:
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-Create a `.env` file inside the `database/` folder (if needed for any additional secrets):
+`database/.env`:
 ```env
 API_KEY=your_firebase_project_api_key_here
 databaseURL=your_firebase_db_url
-manager_email=manager_email
-manager_password=manager_password
+manager_emails=you@example.com,colleague@example.com
+```
+
+> `manager_emails` is an **allowlist** and replaces the old shared
+> `manager_password`.
+
+For Streamlit Cloud, put the same values plus the service-account JSON in
+`.streamlit/secrets.toml` (gitignored) — the `[firebase]` table takes the JSON
+field by field:
+
+```toml
+databaseURL    = "https://<project>-default-rtdb.firebaseio.com/"
+manager_emails = "you@example.com"
+GROQ_API_KEY   = "gsk_..."
+
+[firebase]
+type        = "service_account"
+project_id  = "..."
+private_key = "-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+"
+client_email = "..."
+```
+
+**Google sign-in (optional).** Add an `[auth]` block and the button appears;
+omit it and email/password is used:
+
+```toml
+[auth]
+redirect_uri  = "http://localhost:8501/oauth2callback"
+cookie_secret = "any-long-random-string"
+
+[auth.google]
+client_id           = "...apps.googleusercontent.com"
+client_secret       = "..."
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 ```
 
 ### Step 5 — Add Firebase Credentials
@@ -252,14 +333,14 @@ Place your Firebase Admin SDK JSON file in the project root and ensure the filen
 4. Start in **Test mode** for development (you can add rules later)
 
 ### Step 3 — Create Collections Structure
-Your database should have three top-level nodes:
 ```
 /
-├── users/
-├── stocks/
-└── purchases/
+├── users/          ├── counters/      # atomic ID generation
+├── stocks/         ├── sessions/      # hashed session tokens
+├── purchases/      ├── snapshots/     # nightly portfolio values
+└── transactions/   └── price_cache/   # nightly closes
 ```
-These are created automatically when the app first writes data.
+All are created automatically on first write.
 
 ### Step 4 — Enable Authentication
 1. In the left sidebar, click **Build → Authentication**
@@ -275,17 +356,14 @@ These are created automatically when the app first writes data.
    portfolio-optimization-<project-id>-firebase-adminsdk-<key>.json
    ```
 
-### Step 6 — Update `connection.py`
-Open `database/connection.py` and ensure the credential path matches your file:
-```python
-import firebase_admin
-from firebase_admin import credentials, db
-
-cred = credentials.Certificate("portfolio-optimization-<your-key>.json")
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://<your-project-id>-default-rtdb.firebaseio.com/'
-})
+### Step 6 — Seed the stock catalog
+```bash
+python -m jobs.seed_catalog
 ```
+Validates every ticker in `ml/top 80 compines with ticker.csv` against live NSE
+data and stores the resolved name and sector. Delisted or renamed symbols are
+reported and skipped — no configuration edit is needed, `connection.py` finds the
+credentials automatically.
 
 ### Step 7 — Set Database Rules (Production)
 In Firebase Console → Realtime Database → **Rules**, replace with:
@@ -323,12 +401,18 @@ streamlit run main.py
 
 The app will open at **http://localhost:8501**
 
+### Automation (optional)
+Add `FIREBASE_CREDENTIALS` (the service-account JSON as one line) and
+`DATABASE_URL` to **GitHub → Settings → Secrets → Actions**.
+`.github/workflows/nightly.yml` then runs weekdays at 16:00 IST — auto-selling on
+target price, snapshotting portfolio values, and caching closes.
+
 ### Default Access
 | Role | How to Access |
 |---|---|
 | 👤 **New User** | Click "Register" on the landing page |
 | 🔑 **Existing User** | Click "Login" with your credentials |
-| 🛠️ **Manager** | Click "Manager" and use manager credentials |
+| 🛠️ **Manager** | Log in with an email listed in `manager_emails` |
 
 ---
 

@@ -61,9 +61,6 @@ def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True)
     # Adjust layout to prevent text overlap
     plt.tight_layout()
     
-    # Save the plot
-    plt.savefig('portfolio_comparison.png', bbox_inches='tight', dpi=300)
-    print("\nPortfolio comparison charts have been saved as 'portfolio_comparison.png'")
     
     # Print detailed comparison
     print("\nDetailed Portfolio Comparison:")
@@ -75,5 +72,5 @@ def create_portfolio_charts(portfolio_data, optimized_weights, show_charts=True)
         change = optimized - initial
         company_label = _display_name(company)
         print(f"{company_label[:15]:<15} {initial:>10.1%} {optimized:>15.1%} {change:>10.1%}") 
-
+    plt.close(fig)  # Streamlit renders from the object; unclosed figures leak
     return fig

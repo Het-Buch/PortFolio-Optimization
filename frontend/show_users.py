@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend.manger_home import require_manager
 import pandas as pd
 
 from services.cache import cached_users
@@ -8,9 +10,7 @@ def show_users():
     st.title("User List")
 
     # Safe session check
-    if "user" not in st.session_state or st.session_state["user"] != "manager":
-        st.session_state["page"] = "landing"
-        st.rerun()
+    if not require_manager():
         return
 
     users = cached_users()
