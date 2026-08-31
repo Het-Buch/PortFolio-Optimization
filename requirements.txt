@@ -15,3 +15,7 @@ matplotlib>=3.8,<4
 plotly>=5.20,<7
 firebase-admin>=6.5,<8
 python-dotenv>=1.0,<2
+optuna>=4.0,<5
+xgboost>=2.0,<4
+lightgbm>=4.0,<5
+catboost>=1.2,<2

@@ -3,20 +3,45 @@
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from firebase_admin import db
 
 from database.connection import initialize_firebase
 from database.curd import sell_stock
-from services.stock_services import get_prices, normalize_ticker
+from services.stock_services import get_history, get_prices, normalize_ticker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("nightly")
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 def _today():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """IST, not UTC -- an NSE trading day is an IST calendar day."""
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def last_session(ticker="RELIANCE.NS"):
+    """Date of the most recent NSE session Yahoo has, or None."""
+    hist = get_history([ticker], period="5d")
+    if hist.empty:
+        return None
+    return hist.index[-1].strftime("%Y-%m-%d")
+
+
+def traded_today():
+    """False on weekends, NSE holidays, and before Yahoo settles the close."""
+    # Without this the job stamps the last session's prices with today's date.
+    session = last_session()
+    if session is None:
+        log.error("could not determine last session")
+        return False
+    if session != _today():
+        log.info("no session today (latest is %s) -- market holiday or not settled",
+                 session)
+        return False
+    return True
 
 
 def _open_purchases():
@@ -74,16 +99,35 @@ def cache_prices(prices):
     return len(prices)
 
 
+def _catalog_tickers():
+    """Every live catalog ticker, so the cache covers stocks nobody holds yet."""
+    from database.manager_operation import get_all_stocks_from_db
+    out = set()
+    for s in (get_all_stocks_from_db() or {}).values():
+        t = normalize_ticker((s or {}).get("ticker"))
+        if t:
+            out.add(t)
+    return out
+
+
 def main():
     initialize_firebase()
 
-    purchases = _open_purchases()
-    if not purchases:
-        log.info("no open purchases; nothing to do")
+    if not traded_today():
+        log.info("skipping: no settled session for today")
         return 0
 
-    tickers = {normalize_ticker(p.get("ticker")) for p in purchases.values()}
+    purchases = _open_purchases()
+
+    # Cache the whole catalog -- a price the user has not bought yet still drives
+    # the buy page and the weights the optimizer starts from.
+    tickers = _catalog_tickers()
+    tickers |= {normalize_ticker(p.get("ticker")) for p in purchases.values()}
     tickers.discard("")
+    if not tickers:
+        log.info("no tickers to price; nothing to do")
+        return 0
+
     prices = get_prices(sorted(tickers))
     log.info("fetched %d/%d prices", len(prices), len(tickers))
 
@@ -91,10 +135,15 @@ def main():
         log.error("no prices returned -- aborting before writing anything")
         return 1
 
+    log.info("cached %d prices", cache_prices(prices))
+
+    if not purchases:
+        log.info("no open purchases; prices cached, nothing to sell or snapshot")
+        return 0
+
     log.info("auto-sold %d", auto_sell(purchases, prices))
     # Re-read: auto_sell just changed which purchases are open.
     log.info("snapshotted %d users", snapshot(_open_purchases(), prices))
-    log.info("cached %d prices", cache_prices(prices))
     return 0
 
 

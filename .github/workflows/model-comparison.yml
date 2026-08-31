@@ -1,0 +1,40 @@
+name: Model Comparison
+
+# 02:00 UTC Sunday = 07:30 IST. Weekly: one extra session barely moves 15 years of data.
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "How many tickers to sample"
+        default: "8"
+      trials:
+        description: "Optuna trials per model"
+        default: "40"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: |
+          python -m jobs.model_comparison \
+            --tickers "${{ github.event.inputs.tickers || '8' }}" \
+            --trials "${{ github.event.inputs.trials || '40' }}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-comparison-${{ github.run_number }}
+          path: results/
+          retention-days: 90

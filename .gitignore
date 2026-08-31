@@ -21,3 +21,7 @@ portfolio_comparison.png
 Thumbs.db
 *.docx
 *.pdf
+results/models/
+results/datasets/
+results/optuna/*.db
+_report.txt

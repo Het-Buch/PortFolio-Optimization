@@ -14,6 +14,7 @@
 - [⚙️ Setup & Installation](#%EF%B8%8F-setup--installation)
 - [🔥 Firebase Setup](#-firebase-setup)
 - [▶️ Running the App](#%EF%B8%8F-running-the-app)
+- [🧪 Model Comparison & Tuning](#-model-comparison--tuning)
   
 ---
 
@@ -205,9 +206,10 @@ portfolio-optimization/
 │   ├── cache.py                     # Data caching helpers
 │   └── stock_services.py            # Stock price fetching service
 │
-├── jobs/                            # ⏱️ Scheduled work
+├── jobs/                            # ⏱️ Scheduled and offline work
 │   ├── nightly.py                   # Auto-sell, snapshots, price cache
-│   └── seed_catalog.py              # One-shot catalog seed from CSV
+│   ├── seed_catalog.py              # One-shot catalog seed from CSV
+│   └── model_comparison.py          # 25-model sweep + Optuna tuning (offline)
 │
 ├── .github/workflows/nightly.yml    # Cron: weekdays 16:00 IST
 ├── .streamlit/config.toml           # Fast-start settings
@@ -371,25 +373,33 @@ In Firebase Console → Realtime Database → **Rules**, replace with:
 ```json
 {
   "rules": {
-    "users": {
-      "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid"
-      }
-    },
-    "stocks": {
-      ".read": "auth != null",
-      ".write": "auth != null"
-    },
-    "purchases": {
-      "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid"
-      }
-    }
+    ".read": false,
+    ".write": false,
+    "users":        { ".indexOn": ["personal/email"] },
+    "purchases":    { ".indexOn": ["user_id", "stock_id"] },
+    "transactions": { ".indexOn": ["user_id", "purchased_id"] },
+    "sessions":     { ".indexOn": ["user_id"] },
+    "stocks":       { ".indexOn": ["ticker", "is_deleted"] }
   }
 }
 ```
+
+**Why deny-all is correct here, not a mistake.** The app talks to the database
+through the Firebase **Admin SDK**, which authenticates as a service account and
+bypasses these rules entirely. The rules exist only to stop anyone who learns
+your database URL from reading it directly over REST. `false` is exactly right;
+loosening it to `auth != null` would grant access to any signed-in user of any
+Firebase project.
+
+**`.indexOn` is required regardless.** Index rules are *not* bypassed by the
+Admin SDK. Without them `order_by_child(...).equal_to(...)` raises, and the app
+falls back to downloading the whole table and filtering in Python — correct, but
+it gets slower with every row added. With them, one user's purchases are fetched
+server-side.
+
+> Do **not** use the earlier `"$uid": {".read": "$uid === auth.uid"}` shape.
+> Purchases are keyed by purchase ID (`26p0000001`) with `user_id` as a *field*,
+> so a `$uid` match against the key never succeeds.
 
 ---
 
@@ -402,11 +412,44 @@ streamlit run main.py
 
 The app will open at **http://localhost:8501**
 
-### Automation (optional)
+### Full run order — start to finish
+
+Steps 1–4 are one-time setup. Step 5 is the app. Steps 6–7 are the offline
+research pipeline and are **not** needed to use the app.
+
+| # | Step | Command | Notes |
+|---|---|---|---|
+| 1 | Install | `pip install -r requirements.txt` | |
+| 2 | Configure | create `.env` — see [Step 4](#step-4--configure) | |
+| 3 | Firebase credentials | drop the admin-SDK JSON in the project root | [Firebase Setup](#-firebase-setup) |
+| 4 | Seed the catalog | `python -m jobs.seed_catalog` | one time; 49 NSE companies |
+| 5 | **Run the app** | `streamlit run main.py` | http://localhost:8501 |
+| 6 | Self-checks | `python -m ml.optimizers` | also `ml.optimization`, `ml.tools`, `ml.council`, `database.session` |
+| 7 | Model comparison | `python -m jobs.model_comparison` | offline; see below |
+
+Steps 6 and 7 need no Firebase and no credentials.
+
+### Automation
 Add `FIREBASE_CREDENTIALS` (the service-account JSON as one line) and
-`DATABASE_URL` to **GitHub → Settings → Secrets → Actions**.
-`.github/workflows/nightly.yml` then runs weekdays at 16:00 IST — auto-selling on
-target price, snapshotting portfolio values, and caching closes.
+`DATABASE_URL` to **GitHub → Settings → Secrets → Actions**. Two workflows then
+run on their own:
+
+| Workflow | Schedule | Does |
+|---|---|---|
+| `nightly.yml` | weekdays **18:30 IST** (`0 13 * * 1-5`) | caches every catalog close, auto-sells on target, snapshots portfolio values |
+| `model-comparison.yml` | Sundays **07:30 IST** (`0 2 * * 0`) | re-runs the 25-model sweep, uploads `results/` as a build artifact |
+
+Both have `workflow_dispatch`, so you can trigger either from the **Actions** tab
+without waiting for the schedule.
+
+**18:30 IST is 3 hours after the 15:30 NSE close**, which gives Yahoo time to
+settle the official close. The job also refuses to write unless the latest
+session Yahoo reports actually *is* today — on a weekend, an NSE holiday, or an
+unsettled feed it logs and exits, rather than stamping the previous session's
+prices with today's date and double-counting a day in every user's history.
+
+> ⚠️ GitHub's scheduler is best-effort and can run late under load. Neither job
+> is time-critical, and both are safe to re-run.
 
 ### Default Access
 | Role | How to Access |
@@ -414,6 +457,60 @@ target price, snapshotting portfolio values, and caching closes.
 | 👤 **New User** | Click "Register" on the landing page |
 | 🔑 **Existing User** | Click "Login" with your credentials |
 | 🛠️ **Manager** | Log in with an email listed in `manager_emails` |
+
+---
+
+## 🧪 Model Comparison & Tuning
+
+An offline job that trains the 25 regression models listed in the report's
+Table 3.3, tunes the best of them with Optuna, and writes every artifact to
+`results/`. **It is never imported by the app** — running it is optional.
+
+```bash
+# quick pass, to gauge timing on your machine first
+python -m jobs.model_comparison --tickers 3 --trials 10 --top 3
+
+# full run
+python -m jobs.model_comparison --tickers 8 --trials 40
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--tickers` | `8` | how many NSE symbols to sample |
+| `--trials` | `40` | Optuna trials per tuned model |
+| `--top` | `5` | how many top models to tune |
+| `--target` | `both` | `price`, `return`, or `both` |
+
+### What it produces
+
+| Path | Contents |
+|---|---|
+| `results/model_comparison_<target>.csv` | every model — RMSE, MAE, R², directional %, fold std |
+| `results/model_comparison_<target>_tuned.csv` | post-Optuna scores and best params |
+| `results/models/<target>/*.joblib` | each model refit on the full series |
+| `results/predictions/<target>/*.csv` | per-fold out-of-sample predictions |
+| `results/optuna/<target>.db` | resumable studies — interrupt and re-run safely |
+| `results/datasets/<target>.csv` | the exact feature matrix used |
+| `results/METHODOLOGY.md` | target, CV scheme, baseline, seeds, versions |
+| `results/*.png` | ranking chart and before/after-tuning chart |
+
+### Method
+
+Walk-forward `TimeSeriesSplit(5)` — never a random split — seeded at 42, with
+every model scored against a **naive baseline**: persistence (`tomorrow = today`)
+for the price target, constant zero for the return target. A sub-1% RMSE
+difference is reported as a tie, not a win.
+
+Two targets are evaluated deliberately. On **price levels**, naive persistence
+already scores R² ≈ 0.97, so every model clusters near the ceiling and the metric
+cannot rank them — a high R² there reflects consecutive closes being similar, not
+model skill. On **next-day returns**, the honest target for any directional
+claim, results are reported as measured.
+
+> **Note:** PyCaret is not used. Its pins (`numpy<1.27`, `pandas<2.2.0`,
+> `scipy<=1.11.4`) have no Python 3.13 wheels and installing it would downgrade
+> the whole stack. The models are built directly on scikit-learn, xgboost,
+> lightgbm and catboost, and tuned with Optuna.
 
 ---
 

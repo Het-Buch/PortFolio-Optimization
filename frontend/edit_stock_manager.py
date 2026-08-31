@@ -1,5 +1,6 @@
 import streamlit as st
 from database.manager_operation import get_stock_data, update_stock_data
+from frontend.manger_home import require_manager
 
 
 @st.cache_data(ttl=10)
@@ -10,11 +11,8 @@ def load_stock(stock_id):
 
 def edit_stock_manager():
 
-    # Login check
-    if "user" not in st.session_state:
-        st.warning("You are not logged in. Please login first.")
-        st.session_state["page"] = "landing"
-        st.rerun()
+    # Manager only: this page writes to the shared catalog.
+    if not require_manager():
         return
 
     st.title("Edit Stock")
