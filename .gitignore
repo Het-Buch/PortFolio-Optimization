@@ -1,3 +1,5 @@
+.notes/
+mlruns/
 .env
 .streamlit/secrets.toml
 *firebase-adminsdk*.json

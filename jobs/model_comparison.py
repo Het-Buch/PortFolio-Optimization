@@ -39,12 +39,48 @@ RESULTS = ROOT / "results"
 MODELS = RESULTS / "models"
 PREDS = RESULTS / "predictions"
 STUDIES = RESULTS / "optuna"
+PARAMS = RESULTS / "best_params"
+
+
+MLRUNS = ROOT / "mlruns"
 
 
 def _dirs(target):
     """Every artifact directory for one target run."""
-    for d in (RESULTS, MODELS / target, PREDS / target, STUDIES):
+    for d in (RESULTS, MODELS / target, PREDS / target, STUDIES, PARAMS):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def _mlflow():
+    """File-backed MLflow. No server, no network -- view it with `mlflow ui`."""
+    try:
+        import mlflow
+    except ImportError:
+        return None
+    MLRUNS.mkdir(exist_ok=True)
+    mlflow.set_tracking_uri(f"file:{MLRUNS.as_posix()}")
+    return mlflow
+
+
+class _NoRun:
+    """Stand-in so the job still runs with MLflow absent."""
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def _start(mf, name, nested=False):
+    return mf.start_run(run_name=name, nested=nested) if mf else _NoRun()
+
+
+def _log_params(mf, params):
+    if mf:
+        mf.log_params({k: str(v)[:250] for k, v in params.items()})
+
+
+def _log_metrics(mf, metrics):
+    if mf:
+        mf.log_metrics({k: float(v) for k, v in metrics.items()
+                        if v is not None and np.isfinite(v)})
 
 
 def _boosters():
@@ -199,10 +235,17 @@ def _naive_baseline(X, y, target):
             "r2_std": np.std(r2s), "fit_seconds": 0.0}
 
 
-def evaluate(X, y, target):
+def evaluate(X, y, target, mf=None):
     """Walk-forward evaluation of every model. Never a random split."""
     tscv = TimeSeriesSplit(n_splits=N_SPLITS)
-    rows = [_naive_baseline(X, y, target)]
+    base = _naive_baseline(X, y, target)
+    rows = [base]
+
+    with _start(mf, f"{target}-NAIVE_BASELINE", nested=True):
+        _log_params(mf, {"model": "NAIVE_BASELINE", "target": target,
+                         "strategy": "persistence" if target == "price" else "zero"})
+        _log_metrics(mf, {k: base[k] for k in
+                          ("r2", "rmse", "directional_pct", "r2_std")})
 
     for name, model in _models().items():
         from sklearn.base import clone
@@ -226,14 +269,35 @@ def evaluate(X, y, target):
 
         # Refit on the full series so the saved artifact is the deployable one.
         final = clone(model).fit(X, y)
-        joblib.dump(final, MODELS / target / f"{name}.joblib", compress=3)
-        pd.concat(oof).to_csv(PREDS / target / f"{name}.csv", index=False)
+        model_path = MODELS / target / f"{name}.joblib"
+        pred_path = PREDS / target / f"{name}.csv"
+        joblib.dump(final, model_path, compress=3)
+        pd.concat(oof).to_csv(pred_path, index=False)
 
-        rows.append({"model": name, "r2": np.mean(r2s), "rmse": np.mean(rmses),
-                     "mae": np.mean(maes), "directional_pct": np.mean(dirs),
-                     "r2_std": np.std(r2s), "fit_seconds": round(time.time() - t0, 2),
-                     "model_file": f"models/{target}/{name}.joblib",
-                     "predictions_file": f"predictions/{target}/{name}.csv"})
+        row = {"model": name, "r2": np.mean(r2s), "rmse": np.mean(rmses),
+               "mae": np.mean(maes), "directional_pct": np.mean(dirs),
+               "r2_std": np.std(r2s), "fit_seconds": round(time.time() - t0, 2),
+               "model_file": f"models/{target}/{name}.joblib",
+               "predictions_file": f"predictions/{target}/{name}.csv"}
+        rows.append(row)
+
+        with _start(mf, f"{target}-{name}", nested=True):
+            _log_params(mf, {"model": name, "target": target, "seed": SEED,
+                             "cv": f"TimeSeriesSplit({N_SPLITS})",
+                             "rows": len(X), "features": X.shape[1],
+                             **{k: v for k, v in
+                                getattr(final, "get_params", dict)().items()
+                                if isinstance(v, (int, float, str, bool, type(None)))}})
+            _log_metrics(mf, {k: row[k] for k in
+                              ("r2", "rmse", "mae", "directional_pct",
+                               "r2_std", "fit_seconds")})
+            # Per-fold metrics give MLflow a real curve instead of one point.
+            if mf:
+                for i, (r, e) in enumerate(zip(r2s, rmses)):
+                    mf.log_metric("fold_r2", float(r), step=i)
+                    mf.log_metric("fold_rmse", float(e), step=i)
+                mf.log_artifact(str(model_path), "model")
+                mf.log_artifact(str(pred_path), "predictions")
         print(f"  {name:26s} R2={np.mean(r2s):+.4f}  RMSE={np.mean(rmses):.4f}  "
               f"dir={np.mean(dirs):.1f}%  {time.time() - t0:.1f}s")
 
@@ -321,7 +385,7 @@ TUNABLE = {"Ridge", "Lasso", "ElasticNet", "KernelRidge", "KNeighbors", "RandomF
            "XGBoost", "LightGBM", "CatBoost"}
 
 
-def tune(X, y, names, n_trials, target):
+def tune(X, y, names, n_trials, target, mf=None):
     """Optuna over the top models. Studies persist to SQLite so a run can resume."""
     import optuna
     from sklearn.base import clone
@@ -354,18 +418,51 @@ def tune(X, y, names, n_trials, target):
         if done < n_trials:
             study.optimize(objective, n_trials=n_trials - done, show_progress_bar=False)
 
+        # Refit on the full series with the winning params -- this is the
+        # artifact anything downstream should load.
         best = _suggest(study.best_trial, name)
         best.fit(X, y)
-        joblib.dump(best, MODELS / target / f"{name}_tuned.joblib", compress=3)
-        study.trials_dataframe().to_csv(
-            STUDIES / f"{target}_{name}_trials.csv", index=False)
+        model_path = MODELS / target / f"{name}_tuned.joblib"
+        trials_path = STUDIES / f"{target}_{name}_trials.csv"
+        params_path = PARAMS / f"{target}_{name}.json"
+        joblib.dump(best, model_path, compress=3)
+        study.trials_dataframe().to_csv(trials_path, index=False)
+
+        # Everything needed to rebuild this exact model without re-tuning.
+        params_path.write_text(json.dumps({
+            "model": name, "target": target, "seed": SEED,
+            "cv": f"TimeSeriesSplit({N_SPLITS})",
+            "best_params": study.best_params,
+            "best_rmse": study.best_value,
+            "trials": len(study.trials),
+            "sampler": "TPESampler",
+            "study_name": f"{target}_{name}",
+            "storage": f"optuna/{target}.db",
+            "rows": int(len(X)), "features": int(X.shape[1]),
+            "generated": datetime.now().isoformat(timespec="seconds"),
+        }, indent=2), encoding="utf-8")
 
         rows.append({"model": name, "tuned_rmse": study.best_value,
                      "best_params": json.dumps(study.best_params),
                      "trials": len(study.trials),
                      "tune_seconds": round(time.time() - t0, 1),
                      "model_file": f"models/{target}/{name}_tuned.joblib",
+                     "params_file": f"best_params/{target}_{name}.json",
                      "trials_file": f"optuna/{target}_{name}_trials.csv"})
+
+        with _start(mf, f"{target}-{name}-tuned", nested=True):
+            _log_params(mf, {"model": name, "target": target, "tuned": True,
+                             "seed": SEED, "sampler": "TPESampler",
+                             "trials": len(study.trials), **study.best_params})
+            _log_metrics(mf, {"tuned_rmse": study.best_value,
+                              "tune_seconds": round(time.time() - t0, 1)})
+            if mf:
+                for t_ in study.trials:
+                    if t_.value is not None and np.isfinite(t_.value):
+                        mf.log_metric("trial_rmse", float(t_.value), step=t_.number)
+                mf.log_artifact(str(model_path), "model")
+                mf.log_artifact(str(params_path), "best_params")
+                mf.log_artifact(str(trials_path), "optuna_trials")
         print(f"  {name:26s} tuned RMSE={study.best_value:.5f}  "
               f"({time.time() - t0:.0f}s)  {study.best_params}")
 
@@ -519,16 +616,43 @@ def main():
         (RESULTS / "datasets").mkdir(parents=True, exist_ok=True)
         X.assign(__target=y).to_csv(RESULTS / "datasets" / f"{target}.csv")
 
-        before = evaluate(X, y, target)
-        before.to_csv(RESULTS / f"model_comparison_{target}.csv", index=False)
+        mf = _mlflow()
+        if mf:
+            mf.set_experiment(f"portfolio-{target}")
+        with _start(mf, f"sweep-{target}"):
+            _log_params(mf, {"target": target, "seed": SEED,
+                             "cv": f"TimeSeriesSplit({N_SPLITS})",
+                             "tickers": ",".join(tickers),
+                             "rows": len(X), "features": X.shape[1],
+                             "optuna_trials": args.trials, "top_tuned": args.top})
 
-        ranked = [m for m in before.model if m not in ("NAIVE_BASELINE", "DummyMean")]
-        top = [m for m in ranked if m in TUNABLE][:args.top]
-        print(f"\nTuning top {len(top)}: {', '.join(top)}")
-        after = tune(X, y, top, args.trials, target)
-        after.to_csv(RESULTS / f"model_comparison_{target}_tuned.csv", index=False)
+            before = evaluate(X, y, target, mf)
+            before.to_csv(RESULTS / f"model_comparison_{target}.csv", index=False)
 
-        _plots(before, after, target)
+            ranked = [m for m in before.model
+                      if m not in ("NAIVE_BASELINE", "DummyMean")]
+            top = [m for m in ranked if m in TUNABLE][:args.top]
+            print(f"\nTuning top {len(top)}: {', '.join(top)}")
+            after = tune(X, y, top, args.trials, target, mf)
+            after.to_csv(RESULTS / f"model_comparison_{target}_tuned.csv", index=False)
+
+            _plots(before, after, target)
+
+            if mf:
+                b = before[before.model == "NAIVE_BASELINE"].iloc[0]
+                w = before[before.model != "NAIVE_BASELINE"].iloc[0]
+                _log_metrics(mf, {"baseline_rmse": b.rmse, "baseline_r2": b.r2,
+                                  "best_rmse": w.rmse, "best_r2": w.r2,
+                                  "models_evaluated": len(before) - 1})
+                mf.set_tag("best_model", str(w.model))
+                mf.set_tag("vs_baseline", _verdict(w.rmse, b.rmse))
+                for f in (RESULTS / f"model_comparison_{target}.csv",
+                          RESULTS / f"model_comparison_{target}_tuned.csv",
+                          RESULTS / f"model_comparison_{target}.png",
+                          RESULTS / f"tuning_{target}.png",
+                          RESULTS / "datasets" / f"{target}.csv"):
+                    if f.exists():
+                        mf.log_artifact(str(f), "results")
 
         base = before[before.model == "NAIVE_BASELINE"].iloc[0]
         best = before[before.model != "NAIVE_BASELINE"].iloc[0]
