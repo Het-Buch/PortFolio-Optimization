@@ -7,7 +7,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from ml import tools
+import streamlit as st
+
+from ml import optimizers, tools
 from database.connection import _setting  # loads every .env explicitly
 log = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ TOOL_RESULT_CHARS = 700
 MAX_RETRIES = 3
 MAX_POSITION = 0.35    # no single holding above this
 MAX_TILT = 0.15        # council may move a weight this far from the optimizer's
+STANCE_TTL = 900       # 15 min; a debate outliving its price data is worse than a cache miss
 
 ROLES = {
     "bull": "You argue the constructive case. Find genuine upside: momentum, positive news, undervaluation.",
@@ -208,20 +211,14 @@ def validate(base_weights, tilts, tickers):
     t = np.asarray(tilts, dtype=float)
 
     w = w + np.clip(t, -MAX_TILT, MAX_TILT)      # bound how far the council can move it
-    w = np.clip(w, 0.0, MAX_POSITION)            # no shorts, no over-concentration
 
-    total = w.sum()
-    if total <= 1e-9:
-        w = np.ones(len(w)) / len(w)
-    else:
-        w = w / total
-
-    # Clipping then renormalizing can push a weight back over the cap; settle it.
-    for _ in range(10):
-        if w.max() <= MAX_POSITION + 1e-9:
-            break
-        w = np.clip(w, 0.0, MAX_POSITION)
-        w = w / w.sum()
+    # Reuse the optimizer's projection rather than repeating it. Two versions of
+    # "clip to a cap and renormalize" is how this drifted: the copy here lacked
+    # the infeasible-cap guard, so a 2-stock portfolio under a 35% cap always
+    # came out 50/50, discarding the optimizer's weights and the council's view
+    # alike. It also converges properly instead of leaving float residue above
+    # the cap.
+    w = optimizers._repair(w, cap=MAX_POSITION)[0]
 
     return {t_: float(x) for t_, x in zip(tickers, w)}
 
@@ -242,8 +239,19 @@ def _tilts(stances, tickers):
     return tilt
 
 
-def analyze(tickers, base_weights):
-    """Run the four analysts and apply the validator. Returns everything visible."""
+@st.cache_data(ttl=STANCE_TTL, show_spinner=False)
+def _stances_for(tickers):
+    """The LLM-heavy half. Cached because it is the expensive half.
+
+    Stances depend only on which tickers are under review -- `base_weights`
+    never reaches the analysts, it is applied afterwards by `validate()`. That
+    makes this the right cache boundary: re-running the optimizer with a
+    different algorithm, or re-rendering the page, reuses the debate instead of
+    spending the whole TPM budget arguing the same four stocks again.
+
+    Costs some variability (temperature 0.4 would otherwise differ per run) in
+    exchange for staying inside an 8000 TPM free tier. Worth it.
+    """
     client = _client()
     line = ", ".join(tickers)
 
@@ -258,8 +266,17 @@ def analyze(tickers, base_weights):
                     "points": [], "tickers_of_concern": []}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        stances = list(pool.map(safe, ROLES))
+        return list(pool.map(safe, ROLES))
 
+
+def analyze(tickers, base_weights):
+    """Run the four analysts and apply the validator. Returns everything visible."""
+    # Order-independent key: the same basket in a different order is the same
+    # debate, and should not cost a second one.
+    stances = _stances_for(tuple(sorted(str(t).upper() for t in tickers)))
+
+    # Deliberately outside the cache -- deterministic, instant, and must always
+    # reflect the weights actually on screen.
     tilts = _tilts(stances, tickers)
     final = validate(base_weights, tilts, tickers)
 
@@ -288,7 +305,10 @@ def analyze(tickers, base_weights):
 
     return {"stances": stances, "weights": final, "deltas": deltas,
             "disagreement": disagreement,
-            "unanimous_no_effect": unanimous_no_effect, "_client": client}
+            "unanimous_no_effect": unanimous_no_effect,
+            # Constructing a Groq client is local and cheap; the cached stances
+            # cannot carry one, so the Chair gets a fresh handle.
+            "_client": _client()}
 
 
 def chair_stream(analysis):
@@ -355,6 +375,13 @@ def _self_check():
                        "tickers_of_concern": ticks}], ticks)
     same = validate(base, uniform, ticks)
     assert all(abs(same[t_] - 0.25) < 1e-9 for t_ in ticks), same
+
+    # A cap below equal weight is infeasible and must be skipped, not applied:
+    # 2 holdings under a 35% cap would otherwise always come out 50/50,
+    # discarding the optimizer's weights and the council's view alike.
+    two = validate(np.array([0.8, 0.2]), np.zeros(2), ["A", "B"])
+    assert abs(sum(two.values()) - 1) < 1e-9, two
+    assert abs(two["A"] - 0.8) < 1e-9, f"infeasible cap flattened the weights: {two}"
 
     print("council: OK")
 
