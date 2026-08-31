@@ -1,4 +1,5 @@
-.notes/
+.claude/
+CLAUDE.md
 mlruns/
 .env
 .streamlit/secrets.toml
