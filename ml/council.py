@@ -210,6 +210,12 @@ def validate(base_weights, tilts, tickers):
     w = np.asarray(base_weights, dtype=float).copy()
     t = np.asarray(tilts, dtype=float)
 
+    # A single NaN or inf from an agent must not poison the whole allocation.
+    w = np.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
+    t = np.nan_to_num(t, nan=0.0, posinf=MAX_TILT, neginf=-MAX_TILT)
+    if not w.any():
+        w = np.full(len(w), 1.0 / max(len(w), 1))
+
     w = w + np.clip(t, -MAX_TILT, MAX_TILT)      # bound how far the council can move it
 
     # Reuse the optimizer's projection rather than repeating it. Two versions of
@@ -231,7 +237,14 @@ def _tilts(stances, tickers):
 
     for s in stances:
         sign = direction.get(str(s.get("stance", "hold")).lower(), 0.0)
-        weight = float(s.get("confidence", 0) or 0) / 100.0
+        try:
+            weight = float(s.get("confidence", 0) or 0) / 100.0
+        except (TypeError, ValueError):
+            weight = 0.0
+        # An agent can emit NaN or 900 for confidence; clamp before it reaches money.
+        if not np.isfinite(weight):
+            weight = 0.0
+        weight = min(max(weight, 0.0), 1.0)
         for raw in s.get("tickers_of_concern", []) or []:
             i = index.get(str(raw).upper().replace(".NS", ""))
             if i is not None:
@@ -355,6 +368,22 @@ def _self_check():
     # Degenerate input must not produce NaN.
     w = validate(np.zeros(n), np.zeros(n), ticks)
     assert abs(sum(w.values()) - 1) < 1e-9, w
+
+    # A NaN or inf from one agent used to turn the whole allocation into NaN.
+    for bad in ([np.nan, 1.0, -1.0, 0.0], [np.inf, 0, 0, 0], [-np.inf, 0, 0, 0]):
+        w = validate(base, np.array(bad), ticks)
+        v = np.array(list(w.values()))
+        assert np.isfinite(v).all(), (bad, w)
+        assert abs(v.sum() - 1) < 1e-9, (bad, w)
+        assert (v >= 0).all(), (bad, w)
+    w = validate(np.array([np.nan] * n), np.zeros(n), ticks)
+    assert np.isfinite(list(w.values())).all() and abs(sum(w.values()) - 1) < 1e-9, w
+
+    # Nonsense confidence must not become a tilt.
+    for conf in (float("nan"), float("inf"), -50, 900, "abc", None):
+        t = _tilts([{"stance": "increase", "confidence": conf,
+                     "tickers_of_concern": ["A"]}], ticks)
+        assert np.isfinite(t).all() and abs(t).max() <= MAX_TILT + 1e-9, (conf, t)
 
     assert set(ROLE_MODELS) == set(ROLES), "every role needs a model preference"
     assert all(v for v in ROLE_MODELS.values()), "empty preference list"

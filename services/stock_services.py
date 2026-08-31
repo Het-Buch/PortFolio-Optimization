@@ -74,15 +74,51 @@ def get_history(tickers, period="2y"):
     return hist[cols] if cols else pd.DataFrame()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_closes():
+    """Last night's closes from Firebase. Fallback only -- never raises."""
+    try:
+        from firebase_admin import db
+        row = db.reference("price_cache").get() or {}
+    except Exception as e:
+        logger.warning("price_cache unavailable: %s", e)
+        return {}, ""
+    prices = {k.replace("_", "."): float(v)
+              for k, v in (row.get("prices") or {}).items()}
+    return prices, str(row.get("date", ""))
+
+
 def get_prices(tickers):
     """{ticker: last_close}. Missing tickers are absent; never raises."""
-    hist = get_history(tickers, period="5d")
+    symbols = _key(tickers)
+    hist = get_history(symbols, period="5d")
     out = {}
     for sym in hist.columns:
         s = hist[sym].dropna()
         if not s.empty:
             out[sym] = float(s.iloc[-1])
+
+    # Degrade, never hang: if Yahoo is rate-limited or down, serve the nightly
+    # close rather than a zero that would silently mis-weight the portfolio.
+    missing = [s for s in symbols if s not in out]
+    if missing:
+        cached, day = _cached_closes()
+        filled = [s for s in missing if s in cached]
+        for sym in filled:
+            out[sym] = cached[sym]
+        if filled:
+            logger.info("served %d price(s) from the %s cache: %s",
+                        len(filled), day or "nightly", ", ".join(filled))
     return out
+
+
+def prices_are_stale(tickers):
+    """Which tickers could only be served from cache, and from what date."""
+    symbols = _key(tickers)
+    hist = get_history(symbols, period="5d")
+    live = {s for s in hist.columns if not hist[s].dropna().empty}
+    cached, day = _cached_closes()
+    return sorted(s for s in symbols if s not in live and s in cached), day
 
 
 def get_price(ticker):

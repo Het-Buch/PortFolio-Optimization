@@ -109,6 +109,27 @@ def get_stocks_from_db():
 
     
 
+def _rows_for_user(path, user_id):
+
+    """One user's rows. Indexed query; falls back to a full scan without the rule."""
+
+    ref = db.reference(path)
+
+    try:
+
+        return ref.order_by_child("user_id").equal_to(user_id).get() or {}
+
+    except Exception as e:
+
+        # No .indexOn rule yet -- correct but downloads the whole table.
+
+        print(f"{path}: unindexed scan ({e}); add .indexOn user_id to the rules")
+
+        return {k: v for k, v in (ref.get() or {}).items()
+
+                if (v or {}).get("user_id") == user_id}
+
+
 def _next_id(counter, prefix):
 
     """Atomic counter. Read-max-increment let two concurrent writes collide."""
@@ -289,11 +310,9 @@ def get_purchased_stocks(user_id):
 
 
 
-        ref = db.reference("purchases")
-
         stocks_ref = db.reference("stocks")
 
-        all_purchases = ref.get() or {}
+        all_purchases = _rows_for_user("purchases", user_id)
 
         all_stocks = stocks_ref.get() or {}
 
@@ -647,9 +666,7 @@ def get_user_transactions(user_id):
 
     try:
 
-        ref = db.reference("transactions")
-
-        all_transactions = ref.get() or {}
+        all_transactions = _rows_for_user("transactions", user_id)
 
 
 

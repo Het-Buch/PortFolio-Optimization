@@ -1,9 +1,9 @@
 name: Nightly
 
-# 10:30 UTC = 16:00 IST, after NSE close.
+# 13:00 UTC = 18:30 IST, ~3h after the 15:30 NSE close so Yahoo has settled.
 on:
   schedule:
-    - cron: "30 10 * * 1-5"
+    - cron: "0 13 * * 1-5"
   workflow_dispatch:
 
 jobs:
