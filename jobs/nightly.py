@@ -9,7 +9,8 @@ from firebase_admin import db
 
 from database.connection import initialize_firebase
 from database.curd import sell_stock
-from services.stock_services import get_history, get_prices, normalize_ticker
+from services.stock_services import (get_history, get_prices, normalize_ticker,
+                                     prices_are_stale)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("nightly")
@@ -131,8 +132,18 @@ def main():
     prices = get_prices(sorted(tickers))
     log.info("fetched %d/%d prices", len(prices), len(tickers))
 
+    # get_prices falls back to last night's cache so a page never shows a blank
+    # number. That is right for a render and wrong here: re-stamping a stale
+    # close with today's date freezes it while looking current, and auto_sell
+    # would trade against a price that is not real.
+    stale, day = prices_are_stale(sorted(tickers))
+    if stale:
+        log.warning("dropping %d stale price(s) from %s: %s",
+                    len(stale), day or "cache", ", ".join(stale))
+        prices = {t: p for t, p in prices.items() if t not in stale}
+
     if not prices:
-        log.error("no prices returned -- aborting before writing anything")
+        log.error("no live prices returned -- aborting before writing anything")
         return 1
 
     log.info("cached %d prices", cache_prices(prices))
