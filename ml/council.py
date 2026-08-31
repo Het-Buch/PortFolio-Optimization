@@ -2,7 +2,8 @@
 
 import json
 import logging
-import os
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -10,10 +11,31 @@ from ml import tools
 from database.connection import _setting  # loads every .env explicitly
 log = logging.getLogger(__name__)
 
-FAST_MODEL = "llama-3.1-8b-instant"      # analysts: cheap, high volume
-CHAIR_MODEL = "llama-3.3-70b-versatile"  # chair: one call, needs the reasoning
+# Preference lists, not hard-coded ids: Groq retires models and two hard-coded
+# ids have already broken this. First available on the account wins.
+#
+# Different models per role where the account allows it: four analysts on one
+# model produce correlated errors -- they agree for the same reasons, which
+# defeats the debate. Tool-calling reliability constrains the choice, though:
+# Qwen returns malformed tool calls on Groq (tool_use_failed), so it sits behind
+# the models that call tools correctly rather than leading.
+ROLE_MODELS = {
+    "bull":  ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "bear":  ["openai/gpt-oss-20b", "llama-3.1-8b-instant", "openai/gpt-oss-120b"],
+    "quant": ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
+    "macro": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+}
+FAST_MODELS = ["openai/gpt-oss-20b", "llama-3.1-8b-instant", "qwen/qwen3.6-27b"]
+CHAIR_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile",
+                "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
 
-MAX_TOOL_HOPS = 4      # ceiling on the agent loop; an unbounded loop is an outage
+_resolved = {}
+
+MAX_TOOL_HOPS = 6      # ceiling on the agent loop; too low and agents never conclude
+MAX_WORKERS = 2        # Groq free tier is 8000 TPM; 4 in parallel exceeds it
+ANSWER_TOKENS = 400    # stances are JSON, not essays
+TOOL_RESULT_CHARS = 700
+MAX_RETRIES = 3
 MAX_POSITION = 0.35    # no single holding above this
 MAX_TILT = 0.15        # council may move a weight this far from the optimizer's
 
@@ -46,6 +68,66 @@ def _client():
     return Groq(api_key=key)
 
 
+def _pick_model(client, preferences):
+    """First preference the account can actually use; cached per process."""
+    key = tuple(preferences)
+    if key in _resolved:
+        return _resolved[key]
+
+    try:
+        available = {m.id for m in client.models.list().data}
+    except Exception:
+        available = set()
+
+    choice = next((m for m in preferences if m in available), None)
+    if choice is None:
+        # Nothing preferred: take any chat-capable model rather than failing.
+        choice = next((m for m in sorted(available)
+                       if not any(x in m for x in ("whisper", "guard", "orpheus"))),
+                      preferences[0])
+    _resolved[key] = choice
+    log.info("model resolved: %s", choice)
+    return choice
+
+
+def _complete(client, **kwargs):
+    """Chat call with backoff. Groq's 429 tells us how long to wait -- honour it."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            # A model that cannot format a tool call still has an opinion --
+            # retry once without tools rather than losing the whole agent.
+            if _is_tool_failure(e) and kwargs.get("tools"):
+                log.info("%s emitted a bad tool call; retrying without tools",
+                         kwargs.get("model"))
+                kwargs = {k: v for k, v in kwargs.items() if k != "tools"}
+                continue
+
+            wait = _retry_after(e)
+            if wait is None or attempt == MAX_RETRIES - 1:
+                if wait is None:
+                    raise
+                log.warning("giving up after %d rate-limited attempts", MAX_RETRIES)
+                return None
+            log.info("rate limited, sleeping %.1fs", wait)
+            time.sleep(wait)
+    return None
+
+
+def _retry_after(exc):
+    """Seconds to wait for a rate-limit error, else None for other failures."""
+    if getattr(exc, "status_code", None) != 429 and "429" not in str(exc):
+        return None
+    m = re.search(r"try again in ([\d.]+)s", str(exc))
+    return min(float(m.group(1)) + 0.5, 30.0) if m else 5.0
+
+
+def _is_tool_failure(exc):
+    """Some models emit malformed tool calls; that is recoverable, not fatal."""
+    return "tool_use_failed" in str(exc)
+
+
 def _run_agent(role, portfolio_line, client):
     """One analyst: tool-calling loop until it answers or hits the hop ceiling."""
     messages = [
@@ -55,25 +137,31 @@ def _run_agent(role, portfolio_line, client):
     schemas = tools.schemas_for(role)
     used = []
 
-    for _ in range(MAX_TOOL_HOPS):
-        resp = client.chat.completions.create(
-            model=FAST_MODEL, messages=messages, tools=schemas,
-            temperature=0.4, max_tokens=700,
-        )
+    for hop in range(MAX_TOOL_HOPS):
+        last = hop == MAX_TOOL_HOPS - 1
+        if last:
+            messages.append({"role": "user", "content":
+                             "Stop calling tools. Give your JSON verdict now."})
+        kw = {} if last else {"tools": schemas}
+        resp = _complete(client, model=_pick_model(client, ROLE_MODELS.get(role, FAST_MODELS)),
+                         messages=messages, **kw,
+                         temperature=0.4, max_tokens=ANSWER_TOKENS)
+        if resp is None:
+            break
         msg = resp.choices[0].message
         if not msg.tool_calls:
             return {"role": role, "text": msg.content or "", "tools_used": used,
-                    **_parse_stance(msg.content)}
+                    "model": resp.model, **_parse_stance(msg.content)}
 
         messages.append(msg)
         for tc in msg.tool_calls:
             result = tools.call(tc.function.name, tc.function.arguments)
             used.append(tc.function.name)
             messages.append({"role": "tool", "tool_call_id": tc.id,
-                             "content": json.dumps(result)[:2000]})
+                             "content": json.dumps(result)[:TOOL_RESULT_CHARS]})
 
     return {"role": role, "text": "(no conclusion within tool budget)",
-            "tools_used": used, "stance": "hold", "confidence": 0,
+            "tools_used": used, "model": "", "stance": "hold", "confidence": 0,
             "points": [], "tickers_of_concern": []}
 
 
@@ -132,51 +220,67 @@ def _tilts(stances, tickers):
     return tilt
 
 
-def run(tickers, base_weights, stream=False):
-    """Run the council. Yields progress when stream=True, else returns the result."""
-    def _work():
-        client = _client()
-        line = ", ".join(tickers)
+def analyze(tickers, base_weights):
+    """Run the four analysts and apply the validator. Returns everything visible."""
+    client = _client()
+    line = ", ".join(tickers)
 
-        # Analysts are independent within a round — run them together, not in sequence.
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            stances = list(pool.map(lambda r: _run_agent(r, line, client), ROLES))
+    # Analysts are independent within a round -- run them together, not in sequence.
+    def safe(role):
+        try:
+            return _run_agent(role, line, client)
+        except Exception as e:
+            log.warning("%s agent failed: %s", role, e)
+            return {"role": role, "text": f"(unavailable: {e})", "tools_used": [],
+                    "model": "", "stance": "hold", "confidence": 0,
+                    "points": [], "tickers_of_concern": []}
 
-        weights = validate(base_weights, _tilts(stances, tickers), tickers)
-        return client, stances, weights
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        stances = list(pool.map(safe, ROLES))
 
-    if not stream:
-        _, stances, weights = _work()
-        return {"stances": stances, "weights": weights}
+    tilts = _tilts(stances, tickers)
+    final = validate(base_weights, tilts, tickers)
 
-    def _gen():
-        yield "Convening council...\n\n"
-        client, stances, weights = _work()
+    base = {t_: float(w) for t_, w in zip(tickers, base_weights)}
+    deltas = [{
+        "ticker": t_,
+        "optimizer": base.get(t_, 0.0),
+        "council": final.get(t_, 0.0),
+        "change": final.get(t_, 0.0) - base.get(t_, 0.0),
+        "driven_by": sorted({s["role"] for s in stances
+                             if t_.upper() in {str(x).upper().replace(".NS", "")
+                                               for x in (s.get("tickers_of_concern") or [])}}),
+    } for t_ in tickers]
 
-        for s in stances:
-            tools_note = f" [{', '.join(s['tools_used'])}]" if s["tools_used"] else ""
-            yield f"**{s['role'].title()}** — {s['stance']} ({s['confidence']}%){tools_note}\n"
-        yield "\n---\n\n"
+    disagreement = len({s["stance"] for s in stances}) > 1
+    return {"stances": stances, "weights": final, "deltas": deltas,
+            "disagreement": disagreement, "_client": client}
 
-        summary = json.dumps([{k: s[k] for k in ("role", "stance", "confidence", "points")}
-                              for s in stances])
-        chair = client.chat.completions.create(
-            model=CHAIR_MODEL, stream=True, temperature=0.3, max_tokens=900,
-            messages=[
-                {"role": "system", "content":
-                 "You chair an investment council. Synthesize the analysts' positions, "
-                 "name where they disagreed and how you resolved it, and justify the final "
-                 "allocation. Be concise. Do not invent numbers."},
-                {"role": "user", "content":
-                 f"Analyst positions: {summary}\n\nFinal validated weights: {weights}"},
-            ],
-        )
-        for chunk in chair:
-            piece = chunk.choices[0].delta.content
-            if piece:
-                yield piece
 
-    return _gen()
+def chair_stream(analysis):
+    """Stream the Chair's synthesis over an existing analysis."""
+    client = analysis["_client"]
+    stances = analysis["stances"]
+    summary = json.dumps([{k: s[k] for k in ("role", "stance", "confidence", "points")}
+                          for s in stances])
+
+    resp = client.chat.completions.create(
+        model=_pick_model(client, CHAIR_MODELS), stream=True,
+        temperature=0.3, max_tokens=900,
+        messages=[
+            {"role": "system", "content":
+             "You chair an investment council. Synthesize the analysts' positions, "
+             "state explicitly where they disagreed and how you resolved it, and "
+             "justify the final allocation. Be concise. Do not invent numbers."},
+            {"role": "user", "content":
+             "Analyst positions: " + summary
+             + "\n\nFinal validated weights: " + json.dumps(analysis["weights"])},
+        ],
+    )
+    for chunk in resp:
+        piece = chunk.choices[0].delta.content
+        if piece:
+            yield piece
 
 
 def _self_check():
@@ -198,11 +302,17 @@ def _self_check():
     w = validate(np.zeros(n), np.zeros(n), ticks)
     assert abs(sum(w.values()) - 1) < 1e-9, w
 
+    assert set(ROLE_MODELS) == set(ROLES), "every role needs a model preference"
+    assert all(v for v in ROLE_MODELS.values()), "empty preference list"
     assert _parse_stance("junk")["stance"] == "hold"
     assert _parse_stance('ok {"stance":"increase","confidence":80}')["confidence"] == 80
 
     t = _tilts([{"stance": "decrease", "confidence": 100, "tickers_of_concern": ["B"]}], ticks)
     assert t[1] < 0 and t[0] == 0, t
+
+    # A tilt must actually move the weight, or the council is decorative.
+    moved = validate(base, t, ticks)
+    assert moved["B"] < base[1], moved
     print("council: OK")
 
 
