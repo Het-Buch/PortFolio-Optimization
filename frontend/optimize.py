@@ -147,14 +147,46 @@ def _council(result):
     st.subheader("Council Analysis")
 
     if st.button("Convene council"):
-        from ml.council import run
+        from ml.council import analyze, chair_stream
+
         tickers = result["tickers"]
         base = np.array(list(result["portfolio_weights"].values()))
+
         try:
-            st.write_stream(run(tickers, base, stream=True))
+            with st.spinner("Four analysts are pulling live data..."):
+                analysis = analyze(tickers, base)
         except Exception as e:
             st.error(f"Council unavailable: {e}")
             st.caption("Weights above are unaffected — they come from the optimizer.")
+            return
+
+        for s in analysis["stances"]:
+            icon = {"increase": "🟢", "decrease": "🔴", "hold": "⚪"}.get(s["stance"], "⚪")
+            with st.expander(f"{icon} {s['role'].title()} — {s['stance']} "
+                             f"({s['confidence']}%)"):
+                for point in s.get("points") or []:
+                    st.write(f"- {point}")
+                if s.get("tools_used"):
+                    st.caption(f"Tools called: {', '.join(s['tools_used'])}")
+
+        if analysis["unanimous_no_effect"]:
+            st.info("All four analysts leaned the same direction, so the "
+                    "allocation is unchanged relative to itself — weights are "
+                    "relative, and a portfolio-wide tilt has nothing to move "
+                    "against. See each analyst's reasoning above.")
+        elif analysis["disagreement"]:
+            st.caption("Analysts disagreed — the Chair below explains how it "
+                      "was resolved.")
+
+        st.subheader("Weight Changes")
+        st.dataframe(pd.DataFrame([{
+            "Ticker": d["ticker"], "Optimizer": f"{d['optimizer']:.1%}",
+            "Council": f"{d['council']:.1%}", "Change": f"{d['change']:+.1%}",
+            "Driven by": ", ".join(d["driven_by"]) or "—",
+        } for d in analysis["deltas"]]), width="stretch", hide_index=True)
+
+        st.subheader("Chair's Synthesis")
+        st.write_stream(chair_stream(analysis))
 
 
 if __name__ == "__main__":

@@ -91,18 +91,31 @@ def _pick_model(client, preferences):
 
 
 def _complete(client, **kwargs):
-    """Chat call with backoff. Groq's 429 tells us how long to wait -- honour it."""
+    """Chat call with backoff. Groq's 429 tells us how long to wait -- honour it.
+
+    A model can keep emitting tool-call-shaped text even with `tools` and
+    `tool_choice` both absent -- some instruction-tuned models habitually
+    produce that syntax regardless of what the request declares, and Groq
+    flags it every time. Stripping tools buys one retry, not immunity, so a
+    persistent tool failure degrades to "no answer" rather than raising --
+    losing one agent's turn is recoverable, an unhandled exception is not.
+    """
+    stripped = False
     for attempt in range(MAX_RETRIES):
         try:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
-            # A model that cannot format a tool call still has an opinion --
-            # retry once without tools rather than losing the whole agent.
-            if _is_tool_failure(e) and kwargs.get("tools"):
-                log.info("%s emitted a bad tool call; retrying without tools",
-                         kwargs.get("model"))
-                kwargs = {k: v for k, v in kwargs.items() if k != "tools"}
-                continue
+            if _is_tool_failure(e):
+                if not stripped and (kwargs.get("tools") or kwargs.get("tool_choice")):
+                    log.info("%s emitted a bad tool call; retrying without tools",
+                             kwargs.get("model"))
+                    kwargs = {k: v for k, v in kwargs.items()
+                             if k not in ("tools", "tool_choice")}
+                    stripped = True
+                    continue
+                log.warning("%s keeps emitting invalid tool calls; giving up",
+                           kwargs.get("model"))
+                return None
 
             wait = _retry_after(e)
             if wait is None or attempt == MAX_RETRIES - 1:
@@ -142,14 +155,23 @@ def _run_agent(role, portfolio_line, client):
         if last:
             messages.append({"role": "user", "content":
                              "Stop calling tools. Give your JSON verdict now."})
-        kw = {} if last else {"tools": schemas}
+            # Omitting `tools` when the history already contains tool messages
+            # makes some models try to call one anyway, which Groq then rejects
+            # with 400 "Tool choice is none, but model called a tool". Keep the
+            # schema but force the model off it explicitly instead.
+            kw = {"tools": schemas, "tool_choice": "none"}
+        else:
+            kw = {"tools": schemas}
         resp = _complete(client, model=_pick_model(client, ROLE_MODELS.get(role, FAST_MODELS)),
                          messages=messages, **kw,
                          temperature=0.4, max_tokens=ANSWER_TOKENS)
         if resp is None:
             break
         msg = resp.choices[0].message
-        if not msg.tool_calls:
+        if not msg.tool_calls or last:
+            # tool_choice="none" should prevent tool_calls here, but if a model
+            # ignores it anyway, take whatever text it gave rather than looping
+            # past the hop budget.
             return {"role": role, "text": msg.content or "", "tools_used": used,
                     "model": resp.model, **_parse_stance(msg.content)}
 
@@ -253,8 +275,20 @@ def analyze(tickers, base_weights):
     } for t_ in tickers]
 
     disagreement = len({s["stance"] for s in stances}) > 1
+
+    # A tilt uniform across every ticker cancels out under renormalization --
+    # correct math (weights are relative), but with no explanation it reads as
+    # the council doing nothing. Name it so the UI can say so instead of
+    # showing an all-zero delta table with no context.
+    unanimous_no_effect = (
+        not disagreement
+        and any(s["stance"] != "hold" for s in stances)
+        and all(abs(d["change"]) < 1e-6 for d in deltas)
+    )
+
     return {"stances": stances, "weights": final, "deltas": deltas,
-            "disagreement": disagreement, "_client": client}
+            "disagreement": disagreement,
+            "unanimous_no_effect": unanimous_no_effect, "_client": client}
 
 
 def chair_stream(analysis):
@@ -313,6 +347,15 @@ def _self_check():
     # A tilt must actually move the weight, or the council is decorative.
     moved = validate(base, t, ticks)
     assert moved["B"] < base[1], moved
+
+    # A uniform tilt across every ticker cancels out under renormalization --
+    # that is correct, but unanimous_no_effect must say so rather than the
+    # deltas silently reading as "the council did nothing".
+    uniform = _tilts([{"stance": "decrease", "confidence": 100,
+                       "tickers_of_concern": ticks}], ticks)
+    same = validate(base, uniform, ticks)
+    assert all(abs(same[t_] - 0.25) < 1e-9 for t_ in ticks), same
+
     print("council: OK")
 
 
