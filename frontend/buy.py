@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend import ui
 from services.cache import cached_stocks, cached_portfolio
 from database.curd import add_purchase_to_db
 from services.stock_services import get_prices, normalize_ticker, display_symbol
@@ -17,15 +19,13 @@ def buy():
         return
 
     st.title("Buy Stocks")
-
-    if st.button("Back to Home"):
-        st.session_state["page"] = "home"
-        st.rerun()
+    st.caption("Live NSE prices, fetched in one batched call.")
 
     stock_data = cached_stocks()
 
     if not stock_data:
-        st.warning("No stocks available.")
+        ui.empty("storefront", "Catalog is empty",
+                "The manager has not added any stocks yet.")
         return
 
     # Filter active stocks
@@ -35,7 +35,8 @@ def buy():
     }
 
     if not active_stocks:
-        st.warning("No active stocks available.")
+        ui.empty("storefront", "No stocks available",
+                "Every catalog entry has been removed.")
         return
 
     tickers = [_clean_ticker(v.get("ticker", "")) for v in active_stocks.values()]
@@ -50,19 +51,15 @@ def buy():
 
     company_names = sorted(display_to_id.keys())
 
-    st.subheader("Purchase Stocks")
-
-    selected_label = st.selectbox("Select Company", company_names, index=None, placeholder="Choose a stock")
+    selected_label = st.selectbox("Company", company_names, index=None,
+                                  placeholder="Search a stock...")
 
     if not selected_label:
-        st.info("Select a stock to view price and continue.")
+        ui.empty("search", "Pick a stock",
+                "Choose a company above to see its live price and buy.")
         return
 
-    quantity = st.number_input(
-        "Enter quantity",
-        min_value=1,
-        step=1
-    )
+    quantity = st.number_input("Quantity", min_value=1, step=1)
 
     selected_stock_id = display_to_id.get(selected_label)
     selected_stock = active_stocks.get(selected_stock_id)
@@ -85,12 +82,18 @@ def buy():
     if live_price == 0 and fallback_price > 0:
         st.warning(f"Live price unavailable. Using last saved price: ₹{fallback_price:.2f}")
 
-    st.info(f"Live Price per stock: ₹{price:.2f}")
-    
+    total_preview = round(quantity * price, 2)
+    with st.container(border=True):
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Live price", f"₹{price:,.2f}")
+        m2.metric("Quantity", int(quantity))
+        m3.metric("Total cost", f"₹{total_preview:,.2f}")
+
     col1, col2 = st.columns(2)
     with col1:
 
-        if st.button("Purchase"):
+        if st.button("Confirm purchase", type="primary", width="stretch",
+                     icon=":material/shopping_cart_checkout:"):
 
             if quantity <= 0:
                 st.error("Quantity must be greater than 0.")
@@ -117,7 +120,8 @@ def buy():
 
     with col2:
 
-        if st.button("Home"):
+        if st.button("Back to portfolio", width="stretch",
+                     icon=":material/arrow_back:"):
             st.session_state["page"] = "home"
             st.rerun()
 

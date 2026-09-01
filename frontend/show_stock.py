@@ -1,79 +1,82 @@
 import streamlit as st
-import pandas as pd
 
-from services.cache import cached_stocks
-from database.manager_operation import delete_stock_from_db
+from frontend import ui
 from frontend.manger_home import require_manager
+from services.cache import cached_stocks
+from services.stock_services import display_symbol
+from database.manager_operation import delete_stock_from_db
+
 
 def show_stocks():
     if not require_manager():
         return
 
-    st.title("Stocks List")
+    st.title("Catalog")
+    st.caption("Stocks users can buy. Name and sector come from market data.")
 
     stocks = cached_stocks()
-
     if not stocks:
-        st.warning("No stocks available.")
+        ui.empty("storefront", "Catalog is empty",
+                "Add a ticker and the rest resolves automatically.",
+                "Add a stock", "add_stock")
         return
 
-    # Convert Firebase data to DataFrame
-    stock_list = [
-        {
-            "ID": stock_id,
-            "Name": stock.get("name"),
-            "Ticker": stock.get("ticker"),
-            "Sector": stock.get("sector", "Unknown"),
-        }
-        for stock_id, stock in stocks.items()
-        if not stock.get("is_deleted", False)
-    ]
-
-    if not stock_list:
-        st.info("All stocks are deleted.")
+    live = [(sid, s) for sid, s in stocks.items()
+            if not s.get("is_deleted", False)]
+    if not live:
+        ui.empty("inventory_2", "No active stocks",
+                "Every entry has been removed.", "Add a stock", "add_stock")
         return
 
-    df = pd.DataFrame(stock_list)
-    df.index = df.index + 1
+    sectors = {}
+    for _, s in live:
+        key = str(s.get("sector", "Unknown") or "Unknown")
+        sectors[key] = sectors.get(key, 0) + 1
 
-    st.dataframe(
-        df.drop(columns=["ID"]),
-        width='stretch',
-    )
+    k1, k2 = st.columns(2)
+    with k1:
+        with st.container(border=True):
+            st.metric("Listed stocks", len(live))
+    with k2:
+        with st.container(border=True):
+            st.metric("Sectors covered", len(sectors))
 
-    st.divider()
+    query = st.text_input("Search", placeholder="Company, ticker or sector...",
+                          label_visibility="collapsed")
+    shown = live
+    if query:
+        q = query.lower().strip()
+        shown = [(sid, s) for sid, s in live
+                 if q in str(s.get("name", "")).lower()
+                 or q in str(s.get("ticker", "")).lower()
+                 or q in str(s.get("sector", "")).lower()]
+        if not shown:
+            ui.empty("search_off", "No matches", f"Nothing matched “{query}”.")
+            return
 
-    st.subheader("Manage Stock")
-
-    stock_map = {
-        f'{row["Name"]} ({row["Ticker"]})': row["ID"]
-        for _, row in df.iterrows()
-    }
-
-    selected_display = st.selectbox(
-        "Select Stock",
-        list(stock_map.keys())
-    )
-    selected_stock = stock_map[selected_display]
-
-    if st.button("Delete Stock"):
-
-        success = delete_stock_from_db(selected_stock)
-
-        if success:
-            # clear cache so table refreshes immediately
-            cached_stocks.clear()
-            st.toast("Stock deleted successfully")
-            st.rerun()
-
-        else:
-            st.error("Failed to delete stock.")
-
-    st.divider()
-
-    if st.button("Back to Home"):
-        st.session_state["page"] = "manager_home"
-        st.rerun()
+    ui.label(f"{len(shown)} stock(s)")
+    for sid, s in sorted(shown, key=lambda kv: str(kv[1].get("name", ""))):
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 1.6, 1.6, 1.2])
+            c1.markdown(f"**{s.get('name') or display_symbol(s.get('ticker', ''))}**")
+            c1.caption(f":material/tag: {display_symbol(s.get('ticker', ''))}")
+            c2.html(ui.pill(str(s.get("sector", "Unknown") or "Unknown"), "info"))
+            c3.caption("Added")
+            c3.caption(str(s.get("added_on", "—"))[:10])
+            with c4:
+                b1, b2 = st.columns(2)
+                if b1.button("", key=f"edit_{sid}", icon=":material/edit:",
+                             help="Edit this stock"):
+                    st.session_state["selected_stock"] = sid
+                    st.session_state["page"] = "edit_stock_manager"
+                    st.rerun()
+                if b2.button("", key=f"del_{sid}", icon=":material/delete:",
+                             help="Remove from catalog"):
+                    if delete_stock_from_db(sid):
+                        cached_stocks.clear()
+                        st.toast("Stock removed")
+                        st.rerun()
+                    st.error("Failed to delete stock.")
 
 
 if __name__ == "__main__":

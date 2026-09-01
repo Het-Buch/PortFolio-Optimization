@@ -4,8 +4,7 @@ from services.cache import cached_user, cached_portfolio
 from services.stock_services import get_prices, display_symbol
 from database.curd import sell_stock
 
-GOOD, BAD, NEUTRAL = "#2A9D8F", "#B56576", "#4C86C6"
-PIE = ["#2A9D8F", "#4C86C6", "#B56576", "#EAAC8B", "#8E7DBE", "#5AA9A3"]
+from frontend import ui
 
 
 def home():
@@ -31,7 +30,9 @@ def home():
     purchased = cached_portfolio(user_id)
 
     if not purchased:
-        st.info("No stocks purchased yet.")
+        ui.empty("account_balance_wallet", "No holdings yet",
+                "Buy your first stock and it will show up here with live "
+                "valuation and profit tracking.", "Browse stocks", "buy")
         return
 
     active_stocks = {
@@ -39,7 +40,9 @@ def home():
     }
 
     if not active_stocks:
-        st.info("No active stocks.")
+        ui.empty("inventory_2", "No active holdings",
+                "Everything you owned has been sold. Buy again to start tracking.",
+                "Browse stocks", "buy")
         return
 
     grouped_stocks = {}
@@ -132,56 +135,64 @@ def home():
     pnl = total_value - total_cost
     pnl_pct = (pnl / total_cost) if total_cost else 0
 
+    ui.label("Overview")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Invested", f"₹{total_cost:,.2f}")
-    k2.metric("Current Value", f"₹{total_value:,.2f}")
-    k3.metric("Profit / Loss", f"₹{pnl:,.2f}", f"{pnl_pct:+.2%}")
-    k4.metric("Holdings", len(stock_data))
+    with k1:
+        with st.container(border=True):
+            st.metric("Invested", f"₹{total_cost:,.2f}")
+    with k2:
+        with st.container(border=True):
+            st.metric("Current Value", f"₹{total_value:,.2f}")
+    with k3:
+        with st.container(border=True):
+            st.metric("Profit / Loss", f"₹{pnl:,.2f}", f"{pnl_pct:+.2%}")
+    with k4:
+        with st.container(border=True):
+            st.metric("Holdings", len(stock_data))
 
     left, right = st.columns([1, 1])
     with left:
-        st.subheader("Allocation")
-        fig = go.Figure(go.Pie(
-            labels=[s["company"] for s in stock_data],
-            values=[s["value"] for s in stock_data],
-            hole=0.62, marker=dict(colors=PIE[:len(stock_data)]),
-            textinfo="percent", hovertemplate="%{label}<br>₹%{value:,.2f}<extra></extra>",
-        ))
-        fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
-                          showlegend=True,
-                          legend=dict(orientation="h", y=-0.1))
-        st.plotly_chart(fig, width="stretch")
+        st.markdown("##### :material/donut_large: Allocation")
+        with st.container(border=True):
+            fig = go.Figure(go.Pie(
+                labels=[s["company"] for s in stock_data],
+                values=[s["value"] for s in stock_data],
+                hole=0.66, marker=dict(colors=ui.SERIES[:len(stock_data)],
+                                       line=dict(width=0)),
+                textinfo="percent",
+                hovertemplate="%{label}<br>₹%{value:,.2f}<extra></extra>",
+            ))
+            st.plotly_chart(ui.style_chart(fig, legend=True), width="stretch")
 
     with right:
-        st.subheader("Gain / Loss by stock")
-        gains = [s["value"] - s["invested"] for s in stock_data]
-        fig = go.Figure(go.Bar(
-            y=[s["company"] for s in stock_data], x=gains, orientation="h",
-            marker_color=[GOOD if g >= 0 else BAD for g in gains],
-            text=[f"₹{g:,.0f}" for g in gains], textposition="outside",
-        ))
-        fig.update_layout(height=300, margin=dict(l=0, r=30, t=10, b=0),
-                          xaxis_title="₹ gain / loss")
-        st.plotly_chart(fig, width="stretch")
+        st.markdown("##### :material/bar_chart: Gain / loss by stock")
+        with st.container(border=True):
+            gains = [s["value"] - s["invested"] for s in stock_data]
+            fig = go.Figure(go.Bar(
+                y=[s["company"] for s in stock_data], x=gains, orientation="h",
+                marker_color=[ui.GREEN if g >= 0 else ui.RED for g in gains],
+                text=[f"₹{g:,.0f}" for g in gains], textposition="outside",
+            ))
+            st.plotly_chart(ui.style_chart(fig, title_x="₹ gain / loss"),
+                           width="stretch")
 
-    st.subheader("Your Holdings")
+    ui.label("Your holdings")
     for s in stock_data:
         gain = s["value"] - s["invested"]
         gain_pct = (gain / s["invested"]) if s["invested"] else 0
-        color = GOOD if gain >= 0 else BAD
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
             c1.markdown(f"**{s['company']}**")
             c1.caption(f"{s['ticker']}  ·  {s['quantity']} shares")
-            c2.caption("Avg / Market")
+            c2.caption("Avg → Market")
             c2.write(f"₹{s['avg_price']:,.2f} → ₹{s['market_price']:,.2f}")
             c3.caption("Value")
             c3.write(f"₹{s['value']:,.2f}")
-            c4.caption("Gain / Loss")
-            c4.html(f'<span style="color:{color};font-weight:600">'
-                   f'₹{gain:,.2f} ({gain_pct:+.1%})</span>')
+            c4.caption("Gain / loss")
+            c4.html(ui.money(gain, ui.GREEN if gain >= 0 else ui.RED)
+                   + f' <span style="opacity:.75">({gain_pct:+.1%})</span>')
             if s["target"]:
-                c1.caption(f"🎯 Target ₹{s['target']:,.2f}")
+                c1.caption(f":material/flag: Target ₹{s['target']:,.2f}")
 
     st.divider()
 
@@ -196,23 +207,23 @@ def home():
         label = base_label if count == 1 else f"{base_label} #{count}"
         stock_map[label] = (key, value)
 
-    selected = st.selectbox(
-        "Select Stock",
-        list(stock_map.keys())
-    )
+    ui.label("Manage a position")
+    selected = st.selectbox("Select stock", list(stock_map.keys()))
 
     stock_id, stock = stock_map[selected]
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Set Target"):
+        if st.button("Set target price", width="stretch",
+                     icon=":material/flag:"):
             st.session_state.selected_stock = stock.get("purchase_ids", [None])[0]
             st.session_state.page = "edit_stock"
             st.rerun()
 
     with col2:
-        if st.button("Sell"):
+        if st.button("Sell position", width="stretch", type="primary",
+                     icon=":material/sell:"):
 
             success = False
             sell_price = display_prices.get(stock_id, 0)

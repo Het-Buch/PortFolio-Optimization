@@ -4,25 +4,17 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend import ui
 from ml.optimization import optimize_portfolio, rebalance_orders
 from services.cache import cached_portfolio
 from services.stock_services import get_prices, normalize_ticker, display_symbol
 
-# Same palette as the landing-page hero, so the app reads as one product.
-GOOD, BAD, NEUTRAL, ACCENT = "#2A9D8F", "#B56576", "#4C86C6", "#EAAC8B"
-
-
-def _rgba(hex_color, alpha):
-    """Plotly's marker_color rejects 8-digit hex-alpha (CSS accepts it, Plotly doesn't)."""
-    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-    return f"rgba({r},{g},{b},{alpha})"
+GOOD, BAD, NEUTRAL = ui.GREEN, ui.RED, ui.BLUE
+_rgba = ui.rgba
 
 
 def _pill(action):
-    color = {"BUY": GOOD, "SELL": BAD}.get(action, NEUTRAL)
-    return (f'<span style="background:{color}26;color:{color};'
-            f'border:1px solid {color}59;border-radius:999px;padding:.15rem .65rem;'
-            f'font-size:.8rem;font-weight:600;white-space:nowrap">{action}</span>')
+    return ui.pill(action, {"BUY": "good", "SELL": "bad"}.get(action, "neutral"))
 
 
 def _holdings(active):
@@ -49,11 +41,14 @@ def optimize():
         return
 
     st.title("Portfolio Optimization")
+    st.caption("We test every strategy on your holdings and keep the best one.")
 
     purchased = cached_portfolio(st.session_state["user"]) or {}
     active = [s for s in purchased.values() if not s.get("sold", False)]
     if not active:
-        st.warning("No active stocks in portfolio.")
+        ui.empty("tune", "Nothing to optimize yet",
+                "Buy at least one stock to run the optimizer.",
+                "Browse stocks", "buy")
         return
 
     holdings = _holdings(active)

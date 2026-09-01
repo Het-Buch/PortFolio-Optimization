@@ -1,52 +1,69 @@
 import streamlit as st
 
+from frontend import ui
 from frontend.manger_home import require_manager
-import pandas as pd
-
 from services.cache import cached_users
 
-def show_users():
 
-    st.title("User List")
+def show_users():
 
     # Safe session check
     if not require_manager():
         return
 
+    st.title("Users")
+    st.caption("Everyone registered on the platform.")
+
     users = cached_users()
 
     if not users:
-        st.warning("No users found.")
-        if st.button("Back to Home"):
-            st.session_state["page"] = "manager_home"
-            st.rerun()
+        ui.empty("group_off", "No users yet",
+                "Registrations will appear here as they come in.")
         return
 
-    user_data = [
-        {
-            "User ID": user.get("personal", {}).get("user_id"),
-            "Email": user.get("personal", {}).get("email"),
-            "Name": user.get("personal", {}).get("name"),
-            "Phone": user.get("personal", {}).get("phone"),
-            "Last Login": user.get("login", {}).get("last_login_date"),
-            "Blocked": user.get("personal", {}).get("blocked"),
-        }
-        for user in users.values()
-    ]
+    rows = [u.get("personal", {}) | {"_login": u.get("login", {})}
+            for u in users.values() if u]
+    blocked = sum(1 for r in rows if r.get("blocked"))
 
-    df = pd.DataFrame(user_data)
-    df.index = df.index + 1
+    k1, k2, k3 = st.columns(3)
+    for col, (lbl, val) in zip((k1, k2, k3),
+                               (("Total users", len(rows)),
+                                ("Active", len(rows) - blocked),
+                                ("Blocked", blocked))):
+        with col:
+            with st.container(border=True):
+                st.metric(lbl, val)
 
-    st.dataframe(
-        df,
-        width='stretch'
-    )
+    query = st.text_input("Search", placeholder="Name, email or user ID...",
+                          label_visibility="collapsed")
+    if query:
+        q = query.lower().strip()
+        rows = [r for r in rows
+                if q in str(r.get("name", "")).lower()
+                or q in str(r.get("email", "")).lower()
+                or q in str(r.get("user_id", "")).lower()]
+        if not rows:
+            ui.empty("search_off", "No matches", f"Nothing matched “{query}”.")
+            return
 
-    st.divider()
-
-    if st.button("Back to Home"):
-        st.session_state["page"] = "manager_home"
-        st.rerun()
+    ui.label(f"{len(rows)} user(s)")
+    for r in rows:
+        name = r.get("name") or "—"
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([0.5, 3, 2.2, 1.3])
+            c1.html(
+                f'<div style="width:38px;height:38px;border-radius:50%;'
+                f'background:linear-gradient(135deg,{ui.BLUE},{ui.GREEN});'
+                f'display:flex;align-items:center;justify-content:center;'
+                f'color:#fff;font-weight:700">{str(name)[:1].upper()}</div>')
+            c2.markdown(f"**{name}**")
+            c2.caption(f":material/mail: {r.get('email') or '—'}")
+            c3.caption(f":material/badge: {r.get('user_id') or '—'}")
+            c3.caption(f":material/call: {r.get('phone') or '—'}")
+            c4.html(ui.pill("BLOCKED", "bad") if r.get("blocked")
+                    else ui.pill("ACTIVE", "good"))
+            last = (r.get("_login") or {}).get("last_login_date")
+            c4.caption(f"Last seen {last}" if last else "Never signed in")
 
 
 if __name__ == "__main__":

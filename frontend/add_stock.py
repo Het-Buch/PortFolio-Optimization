@@ -2,6 +2,8 @@
 
 import streamlit as st
 
+from frontend import ui
+
 from database.manager_operation import add_stock_to_db
 from frontend.manger_home import require_manager
 from services.cache import cached_stocks
@@ -13,7 +15,7 @@ def add_stock():
         return
 
     st.title("Add Stock")
-    st.caption("Enter an NSE symbol. Everything else is resolved from market data.")
+    st.caption("Type a ticker. Name, sector and live price resolve automatically.")
 
     symbol = st.text_input("NSE Symbol", placeholder="TCS").strip().upper()
     if not symbol:
@@ -33,10 +35,11 @@ def add_stock():
     existing = {str(s.get("ticker", "")).upper()
                 for s in (cached_stocks() or {}).values()}
     if profile["ticker"] in existing or display_symbol(profile["ticker"]) in existing:
-        st.info("Already in the catalog.")
+        st.html(ui.pill("ALREADY IN CATALOG", "info"))
         return
 
-    if st.button("Add to catalog", type="primary"):
+    if st.button("Add to catalog", type="primary", width="stretch",
+                 icon=":material/add_circle:"):
         # Price is deliberately not stored -- it is stale the moment it is written.
         if add_stock_to_db(profile["name"], profile["ticker"], 0.0, profile["sector"]):
             cached_stocks.clear()
