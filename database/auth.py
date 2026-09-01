@@ -12,17 +12,22 @@ except Exception:
     pass
 
 
-def _users():
-    return db.reference("users").get() or {}
-
-
 def user_id_for_email(email):
     """Find an existing user_id by email. Returns (user_id, blocked)."""
     target = str(email or "").strip().lower()
     if not target:
         return None, False
 
-    for record in _users().values():
+    ref = db.reference("users")
+    try:
+        # Indexed: server-side lookup instead of downloading every user.
+        matches = ref.order_by_child("personal/email").equal_to(target).get() or {}
+    except Exception as e:
+        # No .indexOn rule yet -- correct but downloads the whole table.
+        print(f"users: unindexed scan ({e}); add .indexOn personal/email to the rules")
+        matches = ref.get() or {}
+
+    for record in matches.values():
         personal = (record or {}).get("personal", {})
         if str(personal.get("email", "")).strip().lower() == target:
             return personal.get("user_id"), bool(personal.get("blocked", False))
