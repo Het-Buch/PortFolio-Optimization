@@ -1,4 +1,4 @@
-from firebase_admin import auth, db
+from firebase_admin import db
 from database.connection import initialize_firebase
 from datetime import datetime
 from dotenv import load_dotenv

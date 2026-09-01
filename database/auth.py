@@ -1,7 +1,5 @@
 """Identity resolution. Email/password and Google both land here."""
 
-import os
-
 from firebase_admin import db
 
 from database.connection import initialize_firebase, _setting
