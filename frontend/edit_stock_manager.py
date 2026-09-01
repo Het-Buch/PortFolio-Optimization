@@ -75,6 +75,8 @@ def edit_stock_manager():
             )
 
             if success:
+                from services.cache import cached_stocks
+                cached_stocks.clear()
                 st.toast("Stock updated successfully")
                 st.session_state["page"] = "show_stocks"
                 st.rerun()

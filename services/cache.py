@@ -2,7 +2,10 @@
 
 import streamlit as st
 
-TTL = 60
+# 60s made every page revisited after a short pause re-pay a full Firebase
+# round-trip. 300s matches the price cache in stock_services -- portfolio and
+# user data don't need to be fresher than the prices displayed alongside them.
+TTL = 300
 
 
 @st.cache_data(ttl=TTL, show_spinner=False)
