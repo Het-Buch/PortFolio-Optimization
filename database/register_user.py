@@ -1,7 +1,5 @@
-import firebase_admin
 from firebase_admin import auth, db
 from datetime import datetime
-import requests
 
 # Initialize Firebase connection
 from database.connection import initialize_firebase

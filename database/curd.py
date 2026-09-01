@@ -1,19 +1,8 @@
-import requests
-
-import firebase_admin
-
-from firebase_admin import auth, db
+from firebase_admin import db
 
 from datetime import datetime
 
 from database.connection import initialize_firebase
-
-from dotenv import load_dotenv
-
-import os
-
-
-
 
 
 # Ensure Firebase is initialized
@@ -22,13 +11,6 @@ try:  # real init happens in main.py; never fail at import
     initialize_firebase()
 except Exception:
     pass
-
-
-
-API_KEY = os.getenv("API_KEY")
-
-
-
 
 
 def _can_modify_purchase(stock_data, user_id):
