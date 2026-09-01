@@ -1,6 +1,5 @@
 import streamlit as st
 
-from frontend import ui
 from database.curd import get_stock_data, set_target_price
 from services.cache import cached_portfolio
 
@@ -11,6 +10,11 @@ def load_stock(stock_id):
 
 
 def edit_stock():
+    if "user" not in st.session_state:
+        st.warning("Please login first.")
+        st.session_state["page"] = "login"
+        st.rerun()
+        return
 
     st.title("Set Target Price")
 

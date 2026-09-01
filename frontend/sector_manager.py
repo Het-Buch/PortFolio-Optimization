@@ -16,17 +16,16 @@ def sector_manager():
     if not require_manager():
         return
 
-    st.title("Added Stocks by Sector")
-
-    if st.button("Back to Home"):
-        st.session_state["page"] = "manager_home"
-        st.rerun()
+    st.title("Catalog by Sector")
+    st.caption("How the stocks you've listed spread across industries.")
 
     stocks = cached_stocks() or {}
     active = [s for s in stocks.values() if not s.get("is_deleted", False)]
 
     if not active:
-        st.info("No active stocks available.")
+        ui.empty("donut_large", "Nothing to break down",
+                "Add a stock to the catalog to see its sector.",
+                "Add a stock", "add_stock")
         return
 
     rows = []

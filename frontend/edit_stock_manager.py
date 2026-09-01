@@ -1,6 +1,5 @@
 import streamlit as st
 
-from frontend import ui
 from database.manager_operation import get_stock_data, update_stock_data
 from frontend.manger_home import require_manager
 

@@ -34,6 +34,12 @@ def email_verification(email):
 
 def register_user(email,password,name,phone,country,state,city,zip_code):
     try:
+        # Normalize once so the stored value always matches the indexed
+        # lookup -- an unnormalized write here previously meant a login or a
+        # Google-account link could silently miss if the user had typed any
+        # uppercase letter in their email at registration.
+        email = str(email or "").strip().lower()
+
         # Check if email already exists
         email_exists = email_verification(email)
         if email_exists:
