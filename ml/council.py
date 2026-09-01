@@ -22,10 +22,16 @@ log = logging.getLogger(__name__)
 # Qwen returns malformed tool calls on Groq (tool_use_failed), so it sits behind
 # the models that call tools correctly rather than leading.
 ROLE_MODELS = {
-    "bull":  ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    # Every role here calls tools, and Qwen can't tool-call reliably on Groq
+    # (gotcha #9) -- it stays out of this list entirely, not just de-prioritized.
+    # Llama entries stay as a preference in case this account ever gets one;
+    # _pick_model skips whatever it can't see. On the current account this
+    # resolves to only 2 real models (gpt-oss-20b/120b), split so the two
+    # narrative roles share one and the two analytical roles share the other.
+    "bull":  ["openai/gpt-oss-20b", "llama-3.1-8b-instant", "openai/gpt-oss-120b"],
     "bear":  ["openai/gpt-oss-20b", "llama-3.1-8b-instant", "openai/gpt-oss-120b"],
-    "quant": ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
-    "macro": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+    "quant": ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
+    "macro": ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
 }
 FAST_MODELS = ["openai/gpt-oss-20b", "llama-3.1-8b-instant", "qwen/qwen3.6-27b"]
 CHAIR_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile",
@@ -330,6 +336,14 @@ def chair_stream(analysis):
     stances = analysis["stances"]
     summary = json.dumps([{k: s[k] for k in ("role", "stance", "confidence", "points")}
                           for s in stances])
+    # Without this the Chair only sees free-text points and the final numbers,
+    # and has to guess which analyst moved which ticker -- it guesses wrong
+    # often enough to write a narrative that contradicts the weights it just
+    # printed. driven_by is the actual attribution: which role's
+    # tickers_of_concern touched this ticker.
+    deltas = json.dumps([{k: d[k] for k in ("ticker", "optimizer", "council",
+                                            "change", "driven_by")}
+                         for d in analysis["deltas"]])
 
     resp = client.chat.completions.create(
         model=_pick_model(client, CHAIR_MODELS), stream=True,
@@ -338,9 +352,14 @@ def chair_stream(analysis):
             {"role": "system", "content":
              "You chair an investment council. Synthesize the analysts' positions, "
              "state explicitly where they disagreed and how you resolved it, and "
-             "justify the final allocation. Be concise. Do not invent numbers."},
+             "justify the final allocation. Be concise. Do not invent numbers. "
+             "For each ticker's move, attribute it only to the role(s) named in "
+             "that ticker's driven_by -- never guess which analyst caused a move "
+             "from their prose alone, and never claim a ticker was raised, kept "
+             "high, or protected unless its own numbers actually show that."},
             {"role": "user", "content":
              "Analyst positions: " + summary
+             + "\n\nPer-ticker changes (ground truth for attribution): " + deltas
              + "\n\nFinal validated weights: " + json.dumps(analysis["weights"])},
         ],
     )

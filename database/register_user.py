@@ -17,19 +17,17 @@ def generate_user_id():
     
 def email_verification(email):
     try:
-        # Reference to the database path
         ref = db.reference("users")
+        try:
+            # Indexed: server-side lookup instead of downloading every user.
+            matches = ref.order_by_child("personal/email").equal_to(email).get() or {}
+        except Exception as e:
+            # No .indexOn rule yet -- correct but downloads the whole table.
+            print(f"users: unindexed scan ({e}); add .indexOn personal/email to the rules")
+            matches = {k: v for k, v in (ref.get() or {}).items()
+                      if (v or {}).get("personal", {}).get("email") == email}
 
-        # Fetch all users (Ordered by `user_id`)
-        users = ref.get() or {}
-
-        # Check if email already exists
-        for user in users.values():
-            personal_data = user.get("personal",{})
-            if personal_data.get("email") == email:
-                return "User already registered! Please Login"
-
-        return None
+        return "User already registered! Please Login" if matches else None
     except Exception as e:
         print(f"Error verifying email: {e}")
         return None

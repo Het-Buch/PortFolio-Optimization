@@ -5,9 +5,13 @@ import streamlit as st
 from database import session as sess
 
 
-@st.cache_resource
 def _cookies():
-    """One CookieManager per server process; a new one per rerun breaks reads."""
+    """A thin wrapper -- state lives in the browser, keyed by `key`, not here.
+
+    Must not be cached: stx.CookieManager() renders a component (a widget, in
+    Streamlit's terms), and a cached function's body is skipped on a cache hit,
+    so the widget silently never renders and every cookie read returns None.
+    """
     import extra_streamlit_components as stx
     return stx.CookieManager(key="pms_cookies")
 

@@ -83,9 +83,9 @@ def buy():
         return
 
     if live_price == 0 and fallback_price > 0:
-        st.warning(f"Live price unavailable. Using last saved price: ₹{fallback_price}")
+        st.warning(f"Live price unavailable. Using last saved price: ₹{fallback_price:.2f}")
 
-    st.info(f"Live Price per stock: ₹{price}")
+    st.info(f"Live Price per stock: ₹{price:.2f}")
     
     col1, col2 = st.columns(2)
     with col1:

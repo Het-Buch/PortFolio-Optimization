@@ -21,8 +21,15 @@ def current_weights(portfolio):
     return {c.get("company", "?"): v / total for c, v in zip(portfolio, values)}
 
 
-def optimize_portfolio(portfolio_data, algorithm="PSO", compare_all=False):
-    """Weights + metrics for a portfolio. Pure NumPy after one batched download."""
+def optimize_portfolio(portfolio_data, algorithm=None):
+    """Weights + metrics for a portfolio.
+
+    algorithm=None (the default, and what the app always uses): run every
+    algorithm and keep whichever wins on Sharpe. The user never picks PSO vs.
+    GWO by name -- the backend decides, and the comparison table is the
+    evidence for why. Pass an explicit algorithm only to force one, e.g. in a
+    script or test.
+    """
     portfolio = portfolio_data.get("portfolio", [])
     if not portfolio:
         return None
@@ -34,7 +41,21 @@ def optimize_portfolio(portfolio_data, algorithm="PSO", compare_all=False):
     if history.empty:
         return None
 
-    weights, stats = optimizers.optimize(history, algorithm=algorithm)
+    comparison = None
+    if algorithm:
+        weights, stats = optimizers.optimize(history, algorithm=algorithm)
+    else:
+        ranked = optimizers.compare(history)
+        if not ranked:
+            # Single ticker: compare() needs >=2 assets to have anything to rank.
+            weights, stats = optimizers.optimize(history)
+        else:
+            comparison = ranked
+            best_name, best = max(ranked.items(), key=lambda kv: kv[1]["sharpe"])
+            weights = best["weights"]
+            stats = {"expected_return": best["expected_return"], "risk": best["risk"],
+                     "sharpe": best["sharpe"], "algorithm": best_name}
+
     if not len(weights):
         return None
 
@@ -48,7 +69,7 @@ def optimize_portfolio(portfolio_data, algorithm="PSO", compare_all=False):
             "expected_return": stats["expected_return"],
             "portfolio_risk": stats["risk"],
             "sharpe_ratio": stats["sharpe"],
-            "algorithm": algorithm,
+            "algorithm": stats["algorithm"],
         },
         "risk_metrics": optimizers.risk_metrics(weights, history),
         "initial_weights": current_weights(portfolio),
@@ -57,12 +78,12 @@ def optimize_portfolio(portfolio_data, algorithm="PSO", compare_all=False):
         "history": history,
     }
 
-    if compare_all:
+    if comparison:
         result["comparison"] = {
             name: {"sharpe": r["sharpe"],
                    "expected_return": r["expected_return"],
                    "risk": r["risk"]}
-            for name, r in optimizers.compare(history).items()
+            for name, r in comparison.items()
         }
 
     return result
