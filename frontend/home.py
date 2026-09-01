@@ -123,7 +123,7 @@ def home():
 
             if sold_any:
                 sold_name = stock.get("company_name") or display_symbol(ticker)
-                auto_sold.append(f"{sold_name} @ ₹{sell_check_price}")
+                auto_sold.append(f"{sold_name} @ ₹{sell_check_price:.2f}")
                 continue
 
         total = float(stock.get("total_cost", 0) or 0)
