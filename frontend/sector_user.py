@@ -2,13 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from frontend import ui
 from services.cache import cached_portfolio
-
-
-PIE_COLORS = [
-    "#1F7A8C", "#E27D60", "#85DCB0", "#E8A87C", "#C38D9E",
-    "#41B3A3", "#F4A261", "#2A9D8F", "#264653", "#D62828",
-]
 
 
 def sector_user():
@@ -25,17 +20,16 @@ def sector_user():
         return
 
     st.title("Portfolio by Sector")
-
-    if st.button("Back to Home"):
-        st.session_state["page"] = "home"
-        st.rerun()
+    st.caption("Where your money actually sits, grouped by industry.")
 
     user_id = st.session_state["user"]
     holdings = cached_portfolio(user_id) or {}
 
     active_holdings = [h for h in holdings.values() if not h.get("sold", False)]
     if not active_holdings:
-        st.info("No active holdings available.")
+        ui.empty("donut_large", "Nothing to break down",
+                "Buy a stock and your sector split appears here.",
+                "Browse stocks", "buy")
         return
 
     rows = []
@@ -69,7 +63,7 @@ def sector_user():
         values="Value",
         hole=0.45,
         color="Sector",
-        color_discrete_sequence=PIE_COLORS,
+        color_discrete_sequence=ui.SERIES,
     )
 
     fig.update_traces(
@@ -82,7 +76,7 @@ def sector_user():
             "Invested: Rs %{value:,.2f}<br>"
             "Share: %{customdata[0]:.2f}%<extra></extra>"
         ),
-        marker=dict(line=dict(color="#FFFFFF", width=2)),
+        marker=dict(line=dict(width=0)),
     )
 
     fig.update_layout(
@@ -100,7 +94,44 @@ def sector_user():
         ],
     )
 
-    st.plotly_chart(fig, width='stretch')
+    k1, k2, k3 = st.columns(3)
+    for col, (lbl, val) in zip(
+            (k1, k2, k3),
+            (("Total invested", f"Rs {total_value:,.2f}"),
+             ("Sectors", len(summary)),
+             ("Largest", summary.iloc[0]["Sector"] if len(summary) else "-"))):
+        with col:
+            with st.container(border=True):
+                st.metric(lbl, val)
+
+    left, right = st.columns([1, 1])
+    with left:
+        st.markdown("##### :material/donut_large: Sector split")
+        with st.container(border=True):
+            st.plotly_chart(fig, width="stretch")
+
+    with right:
+        st.markdown("##### :material/bar_chart: Invested by sector")
+        with st.container(border=True):
+            import plotly.graph_objects as go
+            bar = go.Figure(go.Bar(
+                y=list(summary["Sector"]), x=list(summary["Value"]),
+                orientation="h", marker_color=ui.BLUE,
+                text=[f"Rs {v:,.0f}" for v in summary["Value"]],
+                textposition="outside"))
+            st.plotly_chart(ui.style_chart(bar, height=320, title_x="Rs invested"),
+                           width="stretch")
+
+    ui.label("Breakdown")
+    for _, row in summary.iterrows():
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([3, 2, 2])
+            c1.markdown(f"**{row['Sector']}**")
+            c1.caption(f"{int(row['Holdings'])} holding(s)")
+            c2.caption("Invested")
+            c2.write(f"Rs {row['Value']:,.2f}")
+            c3.caption("Share")
+            c3.html(ui.pill(f"{row['Share %']:.2f}%", "info"))
 
 
 if __name__ == "__main__":

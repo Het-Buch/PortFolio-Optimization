@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend import ui
 from database.manager_operation import get_stock_data, update_stock_data
 from frontend.manger_home import require_manager
 
@@ -17,7 +19,7 @@ def edit_stock_manager():
 
     st.title("Edit Stock")
 
-    if st.button("Back to Home"):
+    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
         st.session_state["page"] = "manager_home"
         st.rerun()
 
@@ -63,7 +65,8 @@ def edit_stock_manager():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Update Stock"):
+        if st.button("Update Stock", type="primary", width="stretch",
+                     icon=":material/save:"):
 
             success = update_stock_data(
                 stock_id,
@@ -84,7 +87,7 @@ def edit_stock_manager():
                 st.error("Failed to update stock.")
 
     with col2:
-        if st.button("Cancel"):
+        if st.button("Cancel", width="stretch", icon=":material/close:"):
             st.session_state["page"] = "show_stocks"
             st.rerun()
 

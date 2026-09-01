@@ -2,12 +2,17 @@
 
 import streamlit as st
 
-USER_NAV = [("Home", "home"), ("Buy Stocks", "buy"), ("Optimize", "optimize"),
-            ("Sectors", "sector_user"), ("Profile", "profile")]
+USER_NAV = [("Home", "home", ":material/dashboard:"),
+            ("Buy Stocks", "buy", ":material/add_shopping_cart:"),
+            ("Optimize", "optimize", ":material/tune:"),
+            ("Sectors", "sector_user", ":material/donut_large:"),
+            ("Profile", "profile", ":material/person:")]
 
-MANAGER_NAV = [("Dashboard", "manager_home"), ("Add Stock", "add_stock"),
-               ("Stocks", "show_stocks"), ("Users", "show_users"),
-               ("Sectors", "sector_manager")]
+MANAGER_NAV = [("Dashboard", "manager_home", ":material/analytics:"),
+               ("Add Stock", "add_stock", ":material/add_circle:"),
+               ("Stocks", "show_stocks", ":material/inventory_2:"),
+               ("Users", "show_users", ":material/group:"),
+               ("Sectors", "sector_manager", ":material/donut_large:")]
 
 PAGES = {
     "home": ("frontend.home", "home"),
@@ -47,13 +52,13 @@ def _sidebar():
     st.sidebar.title("Manager" if is_manager else "Menu")
 
     current = st.session_state.get("page")
-    for label, page in (MANAGER_NAV if is_manager else USER_NAV):
-        if st.sidebar.button(label, width="stretch",
+    for label, page, icon in (MANAGER_NAV if is_manager else USER_NAV):
+        if st.sidebar.button(label, width="stretch", icon=icon,
                              type="primary" if page == current else "secondary"):
             go(page)
 
     st.sidebar.divider()
-    if st.sidebar.button("Logout", width="stretch"):
+    if st.sidebar.button("Logout", width="stretch", icon=":material/logout:"):
         _logout()
 
 
@@ -141,26 +146,44 @@ def _landing():
 
     _hero()
 
-    col1, col2 = st.columns(2)
-    if col1.button("Login", width="stretch", type="primary"):
-        go("login")
-    if col2.button("Register", width="stretch"):
-        go("register")
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        col1, col2 = st.columns(2)
+        if col1.button("Login", width="stretch", type="primary",
+                       icon=":material/login:"):
+            go("login")
+        if col2.button("Register", width="stretch", icon=":material/person_add:"):
+            go("register")
 
     st.divider()
-    c1, c2, c3 = st.columns(3)
-    c1.markdown("**7 optimizers**  \nPSO · GWO · Bat · hybrids · ensemble")
-    c2.markdown("**5-agent council**  \nBull · Bear · Quant · Macro · Chair")
-    c3.markdown("**Live NSE data**  \nBatched quotes, news sentiment, risk metrics")
+    features = [
+        (":material/tune:", "Smart optimization",
+         "Seven strategies compete on your holdings; the best risk-adjusted one wins."),
+        (":material/groups:", "Analyst council",
+         "Four AI analysts pull live data, debate, and a chair resolves the call."),
+        (":material/monitoring:", "Live NSE data",
+         "Batched quotes, news sentiment and full risk metrics on every position."),
+    ]
+    cols = st.columns(3)
+    for col, (icon, title, body) in zip(cols, features):
+        with col:
+            with st.container(border=True):
+                st.markdown(f"### {icon}")
+                st.markdown(f"**{title}**")
+                st.caption(body)
 
     st.divider()
     # No privilege granted here -- the manager flag is set only after authentication.
-    if st.button("Manager login"):
+    if st.button("Manager login", icon=":material/admin_panel_settings:"):
         go("login")
 
 
 def landing():
     st.session_state.setdefault("page", "landing")
+
+    # One injection here covers every page the router dispatches to.
+    from frontend.ui import inject
+    inject()
 
     # Rehydrate from cookie so a refresh does not bounce the user to login.
     from frontend.session_ui import restore

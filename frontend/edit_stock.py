@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend import ui
 from database.curd import get_stock_data, set_target_price
 from services.cache import cached_portfolio
 
@@ -12,7 +14,7 @@ def edit_stock():
 
     st.title("Set Target Price")
 
-    if st.button("Back to Home"):
+    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
         st.session_state["page"] = "home"
         st.rerun()
 
@@ -93,7 +95,7 @@ def edit_stock():
                 st.error("Update failed.")
 
     with col2:
-        if st.button("Cancel"):
+        if st.button("Cancel", width="stretch", icon=":material/close:"):
             st.session_state["page"] = "home"
             st.rerun()
 

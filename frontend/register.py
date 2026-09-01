@@ -1,4 +1,6 @@
 import streamlit as st
+
+from frontend import ui
 import database.register_user as rt
 import pandas as pd
 
@@ -17,7 +19,7 @@ def register():
     # ----------------------
     # Basic Information
     # ----------------------
-    st.subheader("Basic Information")
+    ui.label("Basic information")
 
     email = st.text_input("Email")
     name = st.text_input("Name")
@@ -33,7 +35,7 @@ def register():
     # ----------------------
     # Address
     # ----------------------
-    st.subheader("Address")
+    ui.label("Address")
 
     col1, col2 = st.columns(2)
 
@@ -70,7 +72,7 @@ def register():
     # ----------------------
     # Security
     # ----------------------
-    st.subheader("Security")
+    ui.label("Security")
 
     password = st.text_input("Password", type="password")
     confirm_password = st.text_input("Confirm Password", type="password")
@@ -78,7 +80,8 @@ def register():
     # ----------------------
     # Register Button
     # ----------------------
-    if st.button("Register"):
+    if st.button("Create account", type="primary", width="stretch",
+                 icon=":material/person_add:"):
 
         if not all([email, name, phone, password, confirm_password]):
             st.warning("Please fill all required fields.")
@@ -109,7 +112,8 @@ def register():
 
     st.divider()
 
-    if st.button("Go to Login"):
+    if st.button("I already have an account", width="stretch",
+                 icon=":material/login:"):
         st.session_state["page"] = "login"
         st.rerun()
 

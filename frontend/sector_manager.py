@@ -1,5 +1,7 @@
 import streamlit as st
 
+from frontend import ui
+
 from frontend.manger_home import require_manager
 import pandas as pd
 import plotly.express as px
@@ -7,10 +9,7 @@ import plotly.express as px
 from services.cache import cached_stocks
 
 
-PIE_COLORS = [
-    "#355070", "#6D597A", "#B56576", "#E56B6F", "#EAAC8B",
-    "#2A9D8F", "#457B9D", "#F4A261", "#8D99AE", "#BC6C25",
-]
+
 
 
 def sector_manager():
@@ -55,7 +54,7 @@ def sector_manager():
         values="Stock_Count",
         hole=0.45,
         color="Sector",
-        color_discrete_sequence=PIE_COLORS,
+        color_discrete_sequence=ui.SERIES,
     )
 
     fig.update_traces(
@@ -69,7 +68,7 @@ def sector_manager():
             "Share: %{customdata[0]:.2f}%<br>"
             "Listed value: Rs %{customdata[1]:,.2f}<extra></extra>"
         ),
-        marker=dict(line=dict(color="#FFFFFF", width=2)),
+        marker=dict(line=dict(width=0)),
     )
 
     fig.update_layout(
