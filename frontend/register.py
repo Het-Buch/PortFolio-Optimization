@@ -100,6 +100,9 @@ def register():
         )
 
         if result and "successfully" in result.lower():
+            from services.cache import cached_users, cached_user_growth
+            cached_users.clear()
+            cached_user_growth.clear()
             st.success(result)
         else:
             st.error(result)
