@@ -1,8 +1,11 @@
+import plotly.graph_objects as go
 import streamlit as st
-import pandas as pd
 from services.cache import cached_user, cached_portfolio
 from services.stock_services import get_prices, display_symbol
 from database.curd import sell_stock
+
+GOOD, BAD, NEUTRAL = "#2A9D8F", "#B56576", "#4C86C6"
+PIE = ["#2A9D8F", "#4C86C6", "#B56576", "#EAAC8B", "#8E7DBE", "#5AA9A3"]
 
 
 def home():
@@ -19,32 +22,11 @@ def home():
     name = user_details.get("name")
 
     st.title(f"Hi, {name} 👋")
-    st.write("Welcome to the Portfolio Management System!")
+    st.caption("Your portfolio at a glance.")
 
-    st.sidebar.title("Navigation")
-
-    if st.sidebar.button("Buy New"):
-        st.session_state.page = "buy"
-        st.rerun()
-
-    if st.sidebar.button("Optimize"):
-        st.session_state.page = "optimize"
-        st.rerun()
-
-    if st.sidebar.button("Profile"):
-        st.session_state.page = "profile"
-        st.rerun()
-
-    if st.sidebar.button("Show Portfolio Sectors"):
-        st.session_state.page = "sector_user"
-        st.rerun()
-
-    if st.sidebar.button("Logout"):
-        del st.session_state["user"]
-        st.session_state.page = "landing"
-        st.rerun()
-
-    st.divider()
+    # Navigation lives in landing.py's role-driven sidebar. A second copy here
+    # duplicated every button, and its Logout skipped session_ui.end(), leaving
+    # the Firebase token and cookie alive so a refresh logged you straight back in.
 
     purchased = cached_portfolio(user_id)
 
@@ -127,16 +109,17 @@ def home():
                 continue
 
         total = float(stock.get("total_cost", 0) or 0)
-        price_display = avg_buy_price if avg_buy_price > 0 else None
-        total_display = round(total, 2) if total > 0 else None
         display_company_name = stock.get("company_name") or display_symbol(ticker)
-        stock_data.append([
-            display_company_name,
-            quantity,
-            price_display,
-            target_price if target_set else None,
-            total_display
-        ])
+        stock_data.append({
+            "company": display_company_name,
+            "ticker": display_symbol(ticker),
+            "quantity": quantity,
+            "avg_price": avg_buy_price,
+            "market_price": sell_check_price,
+            "invested": total,
+            "value": quantity * sell_check_price,
+            "target": target_price if target_set else None,
+        })
         if total > 0:
             total_cost += total
 
@@ -145,21 +128,60 @@ def home():
         st.success("Auto-sell executed for: " + ", ".join(auto_sold))
         st.rerun()
 
-    df = pd.DataFrame(
-        stock_data,
-        columns=["Company", "Quantity", "Price", "Target", "Total"]
-    )
+    total_value = sum(s["value"] for s in stock_data)
+    pnl = total_value - total_cost
+    pnl_pct = (pnl / total_cost) if total_cost else 0
 
-    # Keep columns numeric to avoid Streamlit/PyArrow conversion warnings.
-    for col in ["Quantity", "Price", "Target", "Total"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Invested", f"₹{total_cost:,.2f}")
+    k2.metric("Current Value", f"₹{total_value:,.2f}")
+    k3.metric("Profit / Loss", f"₹{pnl:,.2f}", f"{pnl_pct:+.2%}")
+    k4.metric("Holdings", len(stock_data))
 
-    df.index = df.index + 1
+    left, right = st.columns([1, 1])
+    with left:
+        st.subheader("Allocation")
+        fig = go.Figure(go.Pie(
+            labels=[s["company"] for s in stock_data],
+            values=[s["value"] for s in stock_data],
+            hole=0.62, marker=dict(colors=PIE[:len(stock_data)]),
+            textinfo="percent", hovertemplate="%{label}<br>₹%{value:,.2f}<extra></extra>",
+        ))
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
+                          showlegend=True,
+                          legend=dict(orientation="h", y=-0.1))
+        st.plotly_chart(fig, width="stretch")
 
-    st.write(f"Total Stocks: {len(df)}")
-    st.write(f"Total Investment: ₹{total_cost:.2f}")
+    with right:
+        st.subheader("Gain / Loss by stock")
+        gains = [s["value"] - s["invested"] for s in stock_data]
+        fig = go.Figure(go.Bar(
+            y=[s["company"] for s in stock_data], x=gains, orientation="h",
+            marker_color=[GOOD if g >= 0 else BAD for g in gains],
+            text=[f"₹{g:,.0f}" for g in gains], textposition="outside",
+        ))
+        fig.update_layout(height=300, margin=dict(l=0, r=30, t=10, b=0),
+                          xaxis_title="₹ gain / loss")
+        st.plotly_chart(fig, width="stretch")
 
-    st.dataframe(df, width='stretch')
+    st.subheader("Your Holdings")
+    for s in stock_data:
+        gain = s["value"] - s["invested"]
+        gain_pct = (gain / s["invested"]) if s["invested"] else 0
+        color = GOOD if gain >= 0 else BAD
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+            c1.markdown(f"**{s['company']}**")
+            c1.caption(f"{s['ticker']}  ·  {s['quantity']} shares")
+            c2.caption("Avg / Market")
+            c2.write(f"₹{s['avg_price']:,.2f} → ₹{s['market_price']:,.2f}")
+            c3.caption("Value")
+            c3.write(f"₹{s['value']:,.2f}")
+            c4.caption("Gain / Loss")
+            c4.html(f'<span style="color:{color};font-weight:600">'
+                   f'₹{gain:,.2f} ({gain_pct:+.1%})</span>')
+            if s["target"]:
+                c1.caption(f"🎯 Target ₹{s['target']:,.2f}")
 
     st.divider()
 
