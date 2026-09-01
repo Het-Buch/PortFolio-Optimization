@@ -22,8 +22,6 @@ def _enter(user_id, manager=False):
 
 
 def login():
-    st.title("Login")
-
     # Returning from the Google redirect — resolve the identity and continue.
     if _google_configured() and getattr(st.user, "is_logged_in", False):
         email = st.user.email
@@ -36,30 +34,39 @@ def login():
         st.logout()
         return
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    from frontend.landing import _hero
+    _hero()
 
-    if st.button("Login", type="primary"):
-        if not email or not password:
-            st.warning("Enter both email and password.")
-        else:
-            user_id = authenticate_user(email, password)
-            if user_id:
-                _enter(user_id)
-            st.error("Invalid credentials")
+    # Constrain the form to a card width -- full-browser-width inputs is what
+    # reads as an empty page, not the field count.
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        st.title("Welcome back")
+        st.caption("Log in to see your portfolio and rebalance it.")
 
-    if _google_configured():
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login", type="primary", width="stretch"):
+            if not email or not password:
+                st.warning("Enter both email and password.")
+            else:
+                user_id = authenticate_user(email, password)
+                if user_id:
+                    _enter(user_id)
+                st.error("Invalid credentials")
+
+        if _google_configured():
+            if st.button("Continue with Google", width="stretch"):
+                st.login("google")
+
         st.divider()
-        if st.button("Continue with Google"):
-            st.login("google")
-
-    st.divider()
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Register"):
-            st.session_state["page"] = "register"
-            st.rerun()
-    with col2:
-        if st.button("Back"):
-            st.session_state["page"] = "landing"
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Register", width="stretch"):
+                st.session_state["page"] = "register"
+                st.rerun()
+        with col2:
+            if st.button("Back", width="stretch"):
+                st.session_state["page"] = "landing"
+                st.rerun()
