@@ -104,8 +104,8 @@ def optimize():
 def _render(result):
     metrics = result["portfolio_metrics"]
     if result.get("comparison"):
-        st.caption(f"Tried {len(result['comparison'])} optimization strategies — "
-                   f"**{metrics['algorithm']}** gave the best risk-adjusted return.")
+        st.caption(f"Tested {len(result['comparison'])} allocation strategies against "
+                   "2 years of price history and kept the best risk-adjusted result.")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Expected Return", f"{metrics['expected_return']:.2%}")
@@ -166,19 +166,26 @@ def _render(result):
             r2.metric("VaR 95%", f"{risk.get('var_95', 0):.2%}")
             r3.metric("Sortino", f"{risk.get('sortino', 0):.2f}")
 
+    # Algorithm names are jargon to an investor -- keep the evidence available
+    # for anyone who wants it, but never make the user read "PSO" to use the app.
     if result.get("comparison"):
-        st.subheader("Algorithm Comparison")
-        ranked = sorted(result["comparison"].items(), key=lambda kv: kv[1]["sharpe"])
-        best = ranked[-1][0]
-        fig = go.Figure(go.Bar(
-            y=[k for k, _ in ranked], x=[v["sharpe"] for _, v in ranked],
-            orientation="h",
-            marker_color=[GOOD if k == best else _rgba(NEUTRAL, 0.5) for k, _ in ranked],
-            text=[f"{v['sharpe']:.3f}" for _, v in ranked], textposition="outside",
-        ))
-        fig.update_layout(height=60 + 42 * len(ranked),
-                          margin=dict(l=0, r=30, t=10, b=0), xaxis_title="Sharpe")
-        st.plotly_chart(fig, width="stretch")
+        with st.expander("How this allocation was chosen (technical detail)"):
+            ranked = sorted(result["comparison"].items(), key=lambda kv: kv[1]["sharpe"])
+            best = ranked[-1][0]
+            st.caption(
+                f"Every strategy below was run on your holdings. **{best}** scored the "
+                "highest Sharpe ratio — return earned per unit of risk taken — so its "
+                "allocation is the one shown above.")
+            fig = go.Figure(go.Bar(
+                y=[k for k, _ in ranked], x=[v["sharpe"] for _, v in ranked],
+                orientation="h",
+                marker_color=[GOOD if k == best else _rgba(NEUTRAL, 0.5)
+                              for k, _ in ranked],
+                text=[f"{v['sharpe']:.3f}" for _, v in ranked], textposition="outside",
+            ))
+            fig.update_layout(height=60 + 42 * len(ranked),
+                              margin=dict(l=0, r=30, t=10, b=0), xaxis_title="Sharpe")
+            st.plotly_chart(fig, width="stretch")
 
     _council(result)
 

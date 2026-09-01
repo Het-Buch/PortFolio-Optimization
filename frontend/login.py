@@ -18,6 +18,12 @@ def _google_configured():
 def _enter(user_id, manager=False):
     start(user_id or "manager", is_manager=manager)
     st.session_state["page"] = "manager_home" if manager else "home"
+    if not manager:
+        # Pay the cold-cache cost here, behind the login spinner, instead of
+        # mid-render on the first page the user lands on.
+        from services.cache import warm
+        with st.spinner("Loading your portfolio..."):
+            warm(user_id)
     st.rerun()
 
 
