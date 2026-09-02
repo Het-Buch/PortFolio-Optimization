@@ -1,15 +1,11 @@
 from firebase_admin import db
 from database.connection import initialize_firebase
 from datetime import datetime
-from dotenv import load_dotenv
-import os
 
 try:  # real init happens in main.py; never fail at import
     initialize_firebase()
 except Exception:
     pass
-load_dotenv()
-API_KEY = os.getenv("API_KEY")
 
 def generate_stock_id():
     n = db.reference("counters/stocks").transaction(lambda cur: (cur or 0) + 1)
