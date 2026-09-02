@@ -150,8 +150,10 @@ def _render(result):
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3, 2, 1.2])
                 c1.markdown(f"**{o['company']}**")
-                c1.caption(f"{o['held']} → {o['target']} shares  ·  "
-                          f"₹{o['price']:.2f}/sh  ·  {o['actual_weight']:.1%} of portfolio")
+                c1.html(ui.flow(f"{o['held']} sh", f"{o['target']} sh",
+                                {"BUY": "good", "SELL": "bad"}.get(o["action"], "neutral")))
+                c1.caption(f"₹{o['price']:.2f}/sh  ·  "
+                          f"{o['actual_weight']:.1%} of portfolio")
                 c2.write(f"₹{o['value']:,.2f}" if o["delta"] else "")
                 c3.html(_pill(o["action"]) if o["delta"] else _pill("HOLD"))
                 if o["delta"]:
@@ -173,6 +175,8 @@ def _render(result):
     # Algorithm names are jargon to an investor -- keep the evidence available
     # for anyone who wants it, but never make the user read "PSO" to use the app.
     if result.get("comparison"):
+        _frontier_3d(result["comparison"])
+
         with st.expander("How this allocation was chosen (technical detail)"):
             ranked = sorted(result["comparison"].items(), key=lambda kv: kv[1]["sharpe"])
             best = ranked[-1][0]
@@ -192,6 +196,63 @@ def _render(result):
             st.plotly_chart(fig, width="stretch")
 
     _council(result)
+
+
+def _frontier_3d(comparison):
+    """Every strategy plotted in risk x return x Sharpe.
+
+    3D earns its place here: the choice between strategies genuinely has three
+    axes, and the winner is the point that is high on return without being far
+    along risk. Flattening that to a bar chart hides why it won.
+    """
+    names = list(comparison)
+    risk = [comparison[n]["risk"] * 100 for n in names]
+    ret = [comparison[n]["expected_return"] * 100 for n in names]
+    sharpe = [comparison[n]["sharpe"] for n in names]
+    best = max(names, key=lambda n: comparison[n]["sharpe"])
+
+    st.subheader("Strategy landscape")
+    st.caption("Each point is one strategy. Higher and further left is better — "
+               "more return for less risk. Drag to rotate.")
+
+    fig = go.Figure()
+
+    # Drop lines to the floor, so a point's height is readable without rotating.
+    for n, x, y, z in zip(names, risk, ret, sharpe):
+        fig.add_scatter3d(x=[x, x], y=[y, y], z=[min(sharpe), z], mode="lines",
+                          line=dict(color=_rgba(NEUTRAL, .28), width=3),
+                          hoverinfo="skip", showlegend=False)
+
+    fig.add_scatter3d(
+        x=risk, y=ret, z=sharpe, mode="markers+text",
+        text=[n if n == best else "" for n in names],
+        textposition="top center",
+        textfont=dict(size=12, color=GOOD),
+        marker=dict(
+            size=[16 if n == best else 8 for n in names],
+            color=[GOOD if n == best else BLUE for n in names],
+            opacity=.92, line=dict(width=2, color=_rgba("#FFFFFF", .35)),
+            symbol=["diamond" if n == best else "circle" for n in names],
+        ),
+        customdata=[[n] for n in names],
+        hovertemplate=("<b>%{customdata[0]}</b><br>Risk %{x:.2f}%<br>"
+                       "Return %{y:.2f}%<br>Sharpe %{z:.3f}<extra></extra>"),
+        showlegend=False,
+    )
+
+    axis = dict(gridcolor="rgba(148,163,184,.18)", zeroline=False,
+                showbackground=False, color="rgba(226,232,240,.75)")
+    fig.update_layout(
+        height=440, margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        scene=dict(
+            xaxis=dict(title="Risk %", **axis),
+            yaxis=dict(title="Return %", **axis),
+            zaxis=dict(title="Sharpe", **axis),
+            camera=dict(eye=dict(x=1.6, y=-1.5, z=.85)),
+        ),
+    )
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 TERMS = """
@@ -363,9 +424,11 @@ def _schedule(orders, result):
             st.caption("Executes after the next NSE close. Cancel any time "
                        "before then.")
             for o in plan.get("orders", []):
-                c1, c2, c3 = st.columns([3, 2, 1])
+                c1, c2, c3 = st.columns([3, 2.4, 1])
                 c1.write(o.get("company") or o.get("ticker"))
-                c2.caption(f"{o.get('held_at_plan')} → {o.get('target')} shares")
+                c2.html(ui.flow(f"{o.get('held_at_plan')} sh", f"{o.get('target')} sh",
+                                {"BUY": "good", "SELL": "bad"}.get(
+                                    o.get("action"), "neutral"), width=104))
                 c3.html(_pill(o.get("action", "HOLD")))
             if st.button("Cancel scheduled rebalance", icon=":material/close:"):
                 if rebalance.cancel(plan.get("plan_id"), user_id):

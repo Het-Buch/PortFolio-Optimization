@@ -131,8 +131,86 @@ def inject():
   /* Section label used above card groups. */
   .sec-label {font-size:.74rem; letter-spacing:.1em; text-transform:uppercase;
     opacity:.55; font-weight:700; margin:.2rem 0 .5rem;}
+
+  /* ---- Motion -------------------------------------------------------- */
+  /* Content settles in rather than snapping. Transform+opacity only, so it
+     runs on the compositor and costs no layout work. */
+  @keyframes riseIn {from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:none}}
+  @keyframes glowPulse {
+    0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.30)}
+    50%    {box-shadow:0 0 0 9px rgba(59,130,246,0)}
+  }
+  @keyframes shimmer {from{background-position:-360px 0} to{background-position:360px 0}}
+  @keyframes dashFlow {to{stroke-dashoffset:-34}}
+
+  .block-container > div > div > div > div[data-testid="stVerticalBlockBorderWrapper"] {
+    animation: riseIn .34s cubic-bezier(.22,.9,.3,1) both;
+  }
+  /* Stagger the first row of cards so a grid resolves left-to-right. */
+  div[data-testid="stHorizontalBlock"] > div:nth-child(1) {animation-delay:.02s}
+  div[data-testid="stHorizontalBlock"] > div:nth-child(2) {animation-delay:.07s}
+  div[data-testid="stHorizontalBlock"] > div:nth-child(3) {animation-delay:.12s}
+  div[data-testid="stHorizontalBlock"] > div:nth-child(4) {animation-delay:.17s}
+
+  div[data-testid="stMetricValue"] {animation: riseIn .4s ease-out both;}
+
+  .stButton > button {transition: transform .12s ease, filter .12s ease,
+                                 box-shadow .18s ease;}
+  .stButton > button:hover {transform: translateY(-1px);}
+  .stButton > button:active {transform: translateY(0) scale(.99);}
+  .stButton > button[kind="primary"] {
+    background-size: 180% 100%;
+    transition: background-position .5s ease, transform .12s ease, filter .12s ease;
+  }
+  .stButton > button[kind="primary"]:hover {background-position: 100% 0;}
+
+  /* Draws attention to a state that will act on its own (a scheduled trade). */
+  .pulse {animation: glowPulse 2.4s ease-out infinite; border-radius:14px;}
+
+  .skeleton {
+    background: linear-gradient(90deg, rgba(148,163,184,.06), rgba(148,163,184,.18),
+                                       rgba(148,163,184,.06));
+    background-size: 720px 100%; animation: shimmer 1.25s linear infinite;
+    border-radius: 8px; height: 1rem;
+  }
+
+  /* Flow arrow used for before -> after transitions. */
+  .flow {display:flex; align-items:center; gap:.85rem; padding:.15rem 0;}
+  .flow .val {font-weight:700; font-size:1.05rem; letter-spacing:-.01em;
+    font-variant-numeric: tabular-nums;}
+  .flow .arrow {flex:none}
+  .flow .arrow .track {stroke:currentColor; opacity:.30; stroke-width:2.5;
+    stroke-linecap:round; stroke-dasharray:7 6; animation: dashFlow 1.1s linear infinite;}
+  .flow .arrow .head {stroke-width:2.8; stroke-linecap:round; stroke-linejoin:round;
+    fill:none;}
+
+  @media (prefers-reduced-motion: reduce) {
+    .block-container *, .flow .arrow .track {animation: none !important;
+      transition: none !important;}
+  }
 </style>
 """)
+
+
+def flow(before, after, kind="neutral", width=132):
+    """Big animated arrow for a before -> after change.
+
+    Reads at a glance in a way "7 -> 4" in body text does not, which matters
+    for a number the user is being asked to authorise.
+    """
+    color = {"good": GREEN, "bad": RED, "info": BLUE}.get(kind, SLATE)
+    return f"""
+<div class="flow">
+  <span class="val" style="opacity:.62">{before}</span>
+  <svg class="arrow" width="{width}" height="26" viewBox="0 0 {width} 26"
+       aria-hidden="true" style="color:{color}">
+    <line class="track" x1="6" y1="13" x2="{width - 22}" y2="13"/>
+    <path class="head" stroke="{color}"
+          d="M{width - 28} 6 L{width - 8} 13 L{width - 28} 20"/>
+  </svg>
+  <span class="val" style="color:{color}">{after}</span>
+</div>
+"""
 
 
 def brand(subtitle="Portfolio"):
