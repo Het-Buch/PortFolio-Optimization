@@ -18,5 +18,11 @@ python-dotenv==1.2.3
 optuna==4.9.0
 xgboost==3.4.1
 lightgbm==4.7.0
-catboost==1.2.10
 mlflow==3.15.2
+
+# catboost is deliberately NOT here: 330 MB, 26% of the whole install, for one
+# model out of 25 that xgboost and lightgbm already cover the shape of. The app
+# never imports it, so on a 1 GB deploy it is pure weight. The model-comparison
+# workflow installs it separately, so Table 3.3 still covers all 25 models --
+# jobs/model_comparison.py imports it behind try/ImportError and reports absent
+# models rather than failing, so a local run without it degrades to 24.
