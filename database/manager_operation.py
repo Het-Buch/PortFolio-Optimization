@@ -79,6 +79,24 @@ def get_all_stocks_from_db():
         print(f"Error fetching stocks: {e}")
         return None
 
+def set_user_blocked(user_id, blocked):
+    """Block or unblock a user. The flag was written at registration and read
+    by the login path, but nothing could ever change it."""
+    try:
+        ref = db.reference("users").child(str(user_id))
+        if not ref.child("personal").get():
+            return False
+        ref.child("personal").update({"blocked": bool(blocked)})
+        ref.child("login").update({
+            "modified_on": clock.stamp(),
+            "modified_by": "manager",
+        })
+        return True
+    except Exception as e:
+        print(f"Error updating blocked flag: {e}")
+        return False
+
+
 def get_users():
     try:
         # Reference to the database path

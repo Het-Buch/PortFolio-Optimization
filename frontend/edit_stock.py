@@ -64,7 +64,38 @@ def edit_stock():
         disabled=True
     )
 
+    # A bare number box gave no way to judge what a sensible target even is.
+    from services.stock_services import get_prices, normalize_ticker
+
+    ticker = normalize_ticker(stock_data.get("ticker"))
+    live = float((get_prices([ticker]) or {}).get(ticker, 0) or 0)
+    qty = int(stock_data.get("quantity", 0) or 0)
+    buy = float(stock_data.get("price_per_stock", 0) or 0)
+    reference = live or buy
+
+    st.divider()
+    st.markdown("##### Set an auto-sell target")
+    st.caption("The whole position sells automatically after market close on "
+               "the first day the price closes at or above your target.")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("You paid", f"₹{buy:,.2f}")
+    m2.metric("Market now", f"₹{live:,.2f}" if live else "—")
+    if live and buy:
+        m3.metric("Unrealised", f"{(live - buy) / buy:+.1%}")
+
+    if reference:
+        st.caption("Common choices, based on the current price:")
+        picks = st.columns(4)
+        for col, pct in zip(picks, (5, 10, 20, 30)):
+            price = round(reference * (1 + pct / 100), 2)
+            if col.button(f"+{pct}%\n₹{price:,.2f}", key=f"tgt{pct}",
+                          width="stretch"):
+                st.session_state["target_pick"] = price
+                st.rerun()
+
     target_default = round(float(stock_data.get("target_price", 0.0) or 0.0), 2)
+    target_default = float(st.session_state.pop("target_pick", target_default))
 
     target_price = st.number_input(
         "Target Price (Auto Sell)",
@@ -73,6 +104,20 @@ def edit_stock():
         step=0.01,
         format="%.2f"
     )
+
+    if target_price > 0 and reference:
+        move = (target_price - reference) / reference
+        if target_price <= reference:
+            st.warning(f"That is at or below the current price, so it would "
+                       f"sell at the very next check — effectively selling now. "
+                       f"Set it above ₹{reference:,.2f} to wait for a gain.",
+                       icon=":material/warning:")
+        else:
+            gain = (target_price - buy) * qty if buy else 0
+            st.info(f"Needs a {move:+.1%} move from here. If it hits, you would "
+                    f"sell {qty} share(s) for ₹{target_price * qty:,.2f}"
+                    + (f", a profit of ₹{gain:,.2f}." if buy else "."),
+                    icon=":material/info:")
 
     col1, col2 = st.columns(2)
 
