@@ -75,7 +75,8 @@ def manager_home():
                     y=list(top.index), x=list(top.values), orientation="h",
                     marker_color=ui.GREEN,
                     text=[f"{v:,.0f}" for v in top.values],
-                    textposition="outside"))
+                    textposition="outside", cliponaxis=False,
+                    hovertemplate="<b>%{y}</b><br>%{x:,.0f} units held<extra></extra>"))
                 st.plotly_chart(ui.style_chart(fig, height=250, title_x="units"),
                                width="stretch")
             else:

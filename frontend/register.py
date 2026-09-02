@@ -1,6 +1,6 @@
 import streamlit as st
 
-from frontend import ui
+from frontend import ui, validate
 import database.register_user as rt
 import pandas as pd
 
@@ -83,12 +83,19 @@ def register():
     if st.button("Create account", type="primary", width="stretch",
                  icon=":material/person_add:"):
 
-        if not all([email, name, phone, password, confirm_password]):
-            st.warning("Please fill all required fields.")
-            return
+        # Show every problem at once -- fixing one, submitting, and being told
+        # about the next is what makes a signup form feel hostile.
+        problems = [p for p in (
+            validate.name(name),
+            validate.email(email),
+            validate.phone(phone),
+            validate.password(password),
+            validate.confirm(confirm_password, password),
+        ) if p]
 
-        if password != confirm_password:
-            st.error("Passwords do not match.")
+        if problems:
+            for p in problems:
+                st.error(p)
             return
 
         result = rt.register_user(

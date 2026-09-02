@@ -202,6 +202,8 @@ def home():
                 y=[s["company"] for s in stock_data], x=gains, orientation="h",
                 marker_color=[ui.GREEN if g >= 0 else ui.RED for g in gains],
                 text=[f"₹{g:,.0f}" for g in gains], textposition="outside",
+                cliponaxis=False,
+                hovertemplate="<b>%{y}</b><br>Gain / loss ₹%{x:,.2f}<extra></extra>",
             ))
             st.plotly_chart(ui.style_chart(fig, title_x="₹ gain / loss"),
                            width="stretch")
@@ -252,22 +254,64 @@ def home():
             st.rerun()
 
     with col2:
+        # Selling used to fire on a single click with no confirmation at all --
+        # an irreversible action behind one tap, next to a navigation button.
         if st.button("Sell position", width="stretch", type="primary",
                      icon=":material/sell:"):
+            st.session_state["confirm_sell"] = stock_id
+            st.rerun()
 
-            success = False
-            sell_price = display_prices.get(stock_id, 0)
-            for purchase_id in stock.get("purchase_ids", []):
-                if sell_stock(
-                    purchase_id,
-                    user_id,
-                    sell_price,
-                    mode="manual"
-                ):
-                    success = True
+    if st.session_state.get("confirm_sell") == stock_id:
+        _confirm_sell(user_id, stock_id, stock, display_prices.get(stock_id, 0))
 
-            if success:
-                cached_portfolio.clear()
-                cached_transactions.clear()  # a sell writes a transaction row too
-                st.toast("Stock sold successfully")
-                st.rerun()
+
+@st.dialog("Confirm sale")
+def _confirm_sell(user_id, stock_id, stock, sell_price):
+    qty = int(stock.get("quantity", 0) or 0)
+    cost = float(stock.get("total_cost", 0) or 0)
+    proceeds = qty * float(sell_price or 0)
+    pnl = proceeds - cost
+
+    st.markdown(f"**{stock.get('company_name') or stock.get('ticker')}**")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Shares", qty)
+    c2.metric("Price", f"₹{sell_price:,.2f}")
+    c3.metric("Proceeds", f"₹{proceeds:,.2f}")
+    st.html("Realised P&L: " + ui.money(pnl, ui.GREEN if pnl >= 0 else ui.RED))
+
+    st.warning("This sells the entire position immediately, at the price shown. "
+               "It cannot be undone — you would have to buy back separately.")
+    with st.expander("Terms of this sale"):
+        st.markdown(
+            "- Executes **now**, at the last available market price, not at a "
+            "price you set. The market price may move between this screen and "
+            "the write.\n"
+            "- The **whole** position is sold, including every lot of this "
+            "stock. Partial sales are only available through a rebalance.\n"
+            "- Recorded in this platform's database only. Nothing is routed to "
+            "a broker or exchange, and no real securities change hands.\n"
+            "- Any target price set on this holding is cleared.\n"
+            "- Irreversible: there is no undo, and the transaction is written "
+            "to your history."
+        )
+
+    agreed = st.checkbox("I understand this is immediate and cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Confirm sale", type="primary", width="stretch",
+                 disabled=not agreed, icon=":material/sell:"):
+        success = False
+        for purchase_id in stock.get("purchase_ids", []):
+            if sell_stock(purchase_id, user_id, sell_price, mode="manual"):
+                success = True
+        st.session_state.pop("confirm_sell", None)
+        if success:
+            cached_portfolio.clear()
+            cached_transactions.clear()  # a sell writes a transaction row too
+            st.toast("Position sold")
+        else:
+            st.toast("Sale failed — nothing was changed")
+        st.rerun()
+
+    if c2.button("Cancel", width="stretch", icon=":material/close:"):
+        st.session_state.pop("confirm_sell", None)
+        st.rerun()

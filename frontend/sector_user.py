@@ -106,23 +106,53 @@ def sector_user():
             with st.container(border=True):
                 st.metric(lbl, val)
 
+    import plotly.graph_objects as go
+
+    CHART_H = 340  # one height for every chart in this row, so they line up
+
     left, right = st.columns([1, 1])
     with left:
-        st.markdown("##### :material/donut_large: Sector split")
+        st.markdown("##### :material/donut_large: By amount invested")
         with st.container(border=True):
+            fig.update_layout(height=CHART_H)
             st.plotly_chart(fig, width="stretch")
 
     with right:
-        st.markdown("##### :material/bar_chart: Invested by sector")
+        st.markdown("##### :material/pie_chart: By number of holdings")
         with st.container(border=True):
-            import plotly.graph_objects as go
-            bar = go.Figure(go.Bar(
-                y=list(summary["Sector"]), x=list(summary["Value"]),
-                orientation="h", marker_color=ui.BLUE,
-                text=[f"Rs {v:,.0f}" for v in summary["Value"]],
-                textposition="outside"))
-            st.plotly_chart(ui.style_chart(bar, height=320, title_x="Rs invested"),
-                           width="stretch")
+            # Money and count answer different questions: one big position can
+            # dominate the amount chart while being a single holding.
+            counts = go.Figure(go.Pie(
+                labels=list(summary["Sector"]), values=list(summary["Holdings"]),
+                hole=0.45, sort=False,
+                marker=dict(colors=ui.SERIES[:len(summary)], line=dict(width=0)),
+                texttemplate="%{label}", textposition="inside",
+                insidetextorientation="radial",
+                hovertemplate="<b>%{label}</b><br>%{value} holding(s)"
+                              "<br>%{percent} of positions<extra></extra>"))
+            total_holdings = int(summary["Holdings"].sum() or 0)
+            counts.update_layout(
+                height=CHART_H, showlegend=False,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                annotations=[dict(text=f"Total<br>{total_holdings} holdings",
+                                  x=.5, y=.5, font=dict(size=15), showarrow=False)])
+            st.plotly_chart(counts, width="stretch")
+
+    st.markdown("##### :material/bar_chart: Invested by sector")
+    with st.container(border=True):
+        bar = go.Figure(go.Bar(
+            y=list(summary["Sector"]), x=list(summary["Value"]),
+            orientation="h", marker_color=ui.BLUE,
+            text=[f"Rs {v:,.0f}" for v in summary["Value"]],
+            textposition="outside", cliponaxis=False,
+            # Without this Plotly prints the raw "(value, label)" tuple.
+            hovertemplate="<b>%{y}</b><br>Rs %{x:,.2f} invested<extra></extra>"))
+        bar = ui.style_chart(bar, height=90 + 46 * len(summary), title_x="Rs invested")
+        # Headroom so the outside labels are not clipped at the plot edge.
+        top = float(summary["Value"].max() or 0)
+        bar.update_xaxes(range=[0, top * 1.22])
+        st.plotly_chart(bar, width="stretch")
 
     ui.label("Breakdown")
     for _, row in summary.iterrows():

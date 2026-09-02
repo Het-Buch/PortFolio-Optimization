@@ -70,7 +70,8 @@ def profile():
                 x=["Bought", "Sold"], y=[invested, realised],
                 marker_color=[ui.BLUE, ui.GREEN],
                 text=[f"₹{invested:,.0f}", f"₹{realised:,.0f}"],
-                textposition="outside"))
+                textposition="outside", cliponaxis=False,
+                hovertemplate="<b>%{x}</b><br>₹%{y:,.2f}<extra></extra>"))
             st.plotly_chart(ui.style_chart(fig, height=240), width="stretch")
 
     for t in sorted(transactions, key=lambda x: str(x.get("timestamp", "")),

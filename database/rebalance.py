@@ -5,8 +5,7 @@ re-derived at execution time against different prices, silently turning the
 thing the user agreed to into something else. Share counts are exactly what was
 shown and accepted; only the price they transact at moves.
 """
-
-from datetime import datetime
+from database import clock
 
 from firebase_admin import db
 
@@ -29,7 +28,7 @@ FAILED = "failed"
 
 def _plan_id():
     n = db.reference("counters/rebalances").transaction(lambda cur: (cur or 0) + 1)
-    return f"{datetime.now().year % 100}r{int(n):07d}"
+    return f"{clock.year2()}r{int(n):07d}"
 
 
 def create_plan(user_id, orders, algorithm=""):
@@ -43,7 +42,7 @@ def create_plan(user_id, orders, algorithm=""):
         cancel(existing["plan_id"], user_id, reason="superseded")
 
     plan_id = _plan_id()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = clock.stamp()
     db.reference(f"rebalance_plans/{plan_id}").set({
         "plan_id": plan_id,
         "user_id": user_id,
@@ -100,7 +99,7 @@ def cancel(plan_id, user_id, reason="user"):
         return False
     ref.update({
         "status": CANCELLED,
-        "cancelled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "cancelled_at": clock.stamp(),
         "cancelled_reason": reason,
     })
     return True
@@ -130,6 +129,6 @@ def claim(plan_id):
 def finish(plan_id, status, detail=None):
     db.reference(f"rebalance_plans/{plan_id}").update({
         "status": status,
-        "executed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "executed_at": clock.stamp(),
         "result": detail or {},
     })

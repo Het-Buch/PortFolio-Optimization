@@ -105,14 +105,38 @@ def optimize():
 
 def _render(result):
     metrics = result["portfolio_metrics"]
-    if result.get("comparison"):
-        st.caption(f"Tested {len(result['comparison'])} allocation strategies against "
+    comparison = result.get("comparison") or {}
+    # With few holdings under a position cap there is only one feasible optimum,
+    # so every strategy lands on it. Claiming we "kept the best" then is a lie
+    # dressed as rigour -- say plainly that they agreed.
+    sharpes = [round(v["sharpe"], 4) for v in comparison.values()]
+    all_agree = len(sharpes) > 1 and len(set(sharpes)) == 1
+
+    if comparison and all_agree:
+        st.caption(f"All {len(comparison)} strategies reached the *same* allocation "
+                   "— with this few holdings there is only one optimum to find, "
+                   "so there was nothing for them to disagree about.")
+    elif comparison:
+        st.caption(f"Tested {len(comparison)} allocation strategies against "
                    "2 years of price history and kept the best risk-adjusted result.")
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Expected Return", f"{metrics['expected_return']:.2%}")
-    c2.metric("Risk", f"{metrics['portfolio_risk']:.2%}")
-    c3.metric("Sharpe", f"{metrics['sharpe_ratio']:.2f}")
+    c1.metric("Expected Return", f"{metrics['expected_return']:.2%}",
+              help="Estimated yearly return of this allocation, from the last "
+                   "2 years of prices. An estimate, not a promise.")
+    c2.metric("Risk", f"{metrics['portfolio_risk']:.2%}",
+              help="How much the value swings year to year. Higher means a "
+                   "bumpier ride, up and down.")
+    c3.metric("Sharpe", f"{metrics['sharpe_ratio']:.2f}",
+              help="Return earned per unit of risk taken. Above 1 is good; "
+                   "below 0 means you were not paid for the risk.")
+
+    if metrics["expected_return"] < 0:
+        st.warning("Every stock you hold lost value on average over the last "
+                   "2 years, so there is no allocation of them with a positive "
+                   "expected return. The suggestion below is the least-bad mix "
+                   "of what you own — not a recommendation to keep holding it.",
+                   icon=":material/warning:")
 
     initial = result["initial_weights"]
     optimized = result["portfolio_weights"]
@@ -121,9 +145,11 @@ def _render(result):
     names = list(optimized)
     fig = go.Figure()
     fig.add_bar(name="Current", y=names, x=[initial.get(n, 0) * 100 for n in names],
-               orientation="h", marker_color=_rgba(NEUTRAL, 0.5))
+               orientation="h", marker_color=_rgba(NEUTRAL, 0.5),
+               hovertemplate="<b>%{y}</b><br>Now %{x:.1f}%<extra></extra>")
     fig.add_bar(name="Suggested", y=names, x=[optimized[n] * 100 for n in names],
-               orientation="h", marker_color=GOOD)
+               orientation="h", marker_color=GOOD,
+               hovertemplate="<b>%{y}</b><br>Suggested %{x:.1f}%<extra></extra>")
     fig.update_layout(barmode="group", height=90 + 55 * len(names),
                       margin=dict(l=0, r=10, t=10, b=0),
                       xaxis_title="Weight (%)", legend=dict(orientation="h", y=1.1))
@@ -166,11 +192,20 @@ def _render(result):
     risk = result.get("risk_metrics") or {}
     if risk:
         st.subheader("Risk Profile")
+        st.caption("Plain English: how bad has this mix felt to hold?")
         with st.container(border=True):
             r1, r2, r3 = st.columns(3)
-            r1.metric("Max Drawdown", f"{risk.get('max_drawdown', 0):.1%}")
-            r2.metric("VaR 95%", f"{risk.get('var_95', 0):.2%}")
-            r3.metric("Sortino", f"{risk.get('sortino', 0):.2f}")
+            r1.metric("Worst fall so far", f"{risk.get('max_drawdown', 0):.1%}",
+                      help="The biggest peak-to-bottom drop this mix has been "
+                           "through. If you cannot stomach this, the allocation "
+                           "is too aggressive for you. (Max drawdown)")
+            r2.metric("Typical bad day", f"{risk.get('var_95', 0):.2%}",
+                      help="On the worst 1 day in 20, you would expect to lose "
+                           "at least this much. (Value at Risk, 95%)")
+            r3.metric("Downside reward", f"{risk.get('sortino', 0):.2f}",
+                      help="Return earned per unit of *downside* risk — it "
+                           "ignores upside swings, which nobody minds. Above 1 "
+                           "is good, below 0 is bad. (Sortino ratio)")
 
     # Algorithm names are jargon to an investor -- keep the evidence available
     # for anyone who wants it, but never make the user read "PSO" to use the app.
@@ -230,7 +265,7 @@ def _frontier_3d(comparison):
         textfont=dict(size=12, color=GOOD),
         marker=dict(
             size=[16 if n == best else 8 for n in names],
-            color=[GOOD if n == best else BLUE for n in names],
+            color=[GOOD if n == best else NEUTRAL for n in names],
             opacity=.92, line=dict(width=2, color=_rgba("#FFFFFF", .35)),
             symbol=["diamond" if n == best else "circle" for n in names],
         ),
