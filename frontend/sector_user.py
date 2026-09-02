@@ -70,7 +70,9 @@ def sector_user():
         textinfo="label",
         textposition="inside",
         insidetextorientation="radial",
-        customdata=summary[["Share %"]],
+        # .values.tolist(): Plotly 6 serializes a 2-D array as base64 bdata,
+        # which Streamlit's bundled plotly.js does not decode -- hover shows NaN.
+        customdata=summary[["Share %"]].values.tolist(),
         hovertemplate=(
             "<b>%{label}</b><br>"
             "Invested: Rs %{value:,.2f}<br>"

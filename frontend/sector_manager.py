@@ -31,16 +31,11 @@ def sector_manager():
     rows = []
     for stock in active:
         sector = str(stock.get("sector", "Unknown") or "Unknown").strip() or "Unknown"
-        rows.append({
-            "Sector": sector,
-            "Stock Count": 1,
-            "Listed Value": float(stock.get("price", 0) or 0),
-        })
+        rows.append({"Sector": sector, "Stock Count": 1})
 
     df = pd.DataFrame(rows)
     summary = df.groupby("Sector", as_index=False).agg(
         Stock_Count=("Stock Count", "sum"),
-        Listed_Value=("Listed Value", "sum"),
     )
 
     summary = summary.sort_values("Stock_Count", ascending=False)
@@ -60,12 +55,15 @@ def sector_manager():
         textinfo="label",
         textposition="inside",
         insidetextorientation="radial",
-        customdata=summary[["Share %", "Listed_Value"]],
+        # .values.tolist(): Plotly 6 serializes a 2-D array as base64 bdata,
+        # which Streamlit's bundled plotly.js does not decode -- hover shows NaN.
+        customdata=summary[["Share %"]].values.tolist(),
+        # No value line: the catalog stores price 0 for every stock (live prices
+        # come from get_prices() at render time), so it would always read Rs 0.00.
         hovertemplate=(
             "<b>%{label}</b><br>"
             "Stocks: %{value}<br>"
-            "Share: %{customdata[0]:.2f}%<br>"
-            "Listed value: Rs %{customdata[1]:,.2f}<extra></extra>"
+            "Share: %{customdata[0]:.2f}%<extra></extra>"
         ),
         marker=dict(line=dict(width=0)),
     )
@@ -85,7 +83,7 @@ def sector_manager():
         ],
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 if __name__ == "__main__":
