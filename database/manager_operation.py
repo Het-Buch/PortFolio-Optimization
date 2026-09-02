@@ -1,6 +1,6 @@
 from firebase_admin import db
 from database.connection import initialize_firebase
-from datetime import datetime
+from database import clock
 
 try:  # real init happens in main.py; never fail at import
     initialize_firebase()
@@ -9,7 +9,7 @@ except Exception:
 
 def generate_stock_id():
     n = db.reference("counters/stocks").transaction(lambda cur: (cur or 0) + 1)
-    return f"{datetime.now().year % 100}s{int(n):07d}"
+    return f"{clock.year2()}s{int(n):07d}"
 
 def stock_exists(stock_ticker):
     try:
@@ -46,9 +46,9 @@ def add_stock_to_db(stock_name, stock_ticker, stock_price=0.0, sector="Unknown")
             "sector": str(sector or "Unknown").strip() or "Unknown",
             "stock_id": stock_id,
             "is_deleted": False,
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
             "updated_by": "manager",
-            "added_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "added_on": clock.stamp(),
             "added_by": "manager",
         })
 
@@ -158,7 +158,7 @@ def delete_stock_from_db(stock_id):
         # Mark the stock as deleted (soft delete)
         ref.child(stock_id).update({
             "is_deleted": True,
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
             "updated_by": "manager"  # Assuming the manager is deleting the stock
         })
 
@@ -195,7 +195,7 @@ def update_stock_data(stock_id, stock_name, stock_ticker, stock_price, user_id, 
             "ticker": stock_ticker,
             "price": stock_price,
             "sector": str(sector or "Unknown").strip() or "Unknown",
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
             "updated_by": user_id  
         })
 

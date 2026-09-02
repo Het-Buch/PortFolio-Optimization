@@ -3,6 +3,7 @@
 import requests
 from firebase_admin import db
 
+from database import clock
 from database.connection import initialize_firebase, _setting
 
 try:  # real init happens in main.py; never fail at import
@@ -60,13 +61,12 @@ def authenticate_manager(email, password):
 def provision_google_user(email, name):
     """Create a minimal user record on first Google sign-in."""
     from database.register_user import generate_user_id
-    from datetime import datetime
 
     user_id = generate_user_id()
     if not user_id:
         return None
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = clock.stamp()
     ref = db.reference("users").child(user_id)
     ref.child("personal").set({
         "user_id": user_id,
@@ -90,8 +90,7 @@ def sign_in_with_google(email, name=""):
     if blocked:
         return None
     if user_id:
-        from datetime import datetime
         db.reference("users").child(user_id).child("login").update(
-            {"last_login_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            {"last_login_date": clock.stamp()})
         return user_id
     return provision_google_user(email, name)

@@ -1,7 +1,7 @@
 import requests
 import firebase_admin
 from firebase_admin import auth ,db
-from datetime import datetime
+from database import clock
 
 from database.connection import initialize_firebase
 from dotenv import load_dotenv
@@ -69,7 +69,7 @@ def authenticate_user(email, password):
 
             # Update login time
             login = {
-                "last_login_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "last_login_date": clock.stamp()
             }
             users_ref.child(user_id).child("login").update(login)
             return user_id, None

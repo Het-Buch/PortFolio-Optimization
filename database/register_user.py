@@ -1,5 +1,5 @@
 from firebase_admin import auth, db
-from datetime import datetime
+from database import clock
 
 # Initialize Firebase connection
 from database.connection import initialize_firebase
@@ -11,7 +11,7 @@ except Exception:
 
 def generate_user_id():
     n = db.reference("counters/users").transaction(lambda cur: (cur or 0) + 1)
-    return f"{datetime.now().year % 100}u{int(n):07d}"
+    return f"{clock.year2()}u{int(n):07d}"
     
 def email_verification(email):
     try:
@@ -72,9 +72,9 @@ def register_user(email,password,name,phone,country,state,city,zip_code):
         }
 
         login={
-            "first_login_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "last_login_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "modified_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "first_login_date": clock.stamp(),
+            "last_login_date": clock.stamp(),
+            "modified_on": clock.stamp(),
             "modified_by": user_id,
         }
 

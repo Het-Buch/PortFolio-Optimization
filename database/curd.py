@@ -1,6 +1,5 @@
 from firebase_admin import db
-
-from datetime import datetime
+from database import clock
 
 from database.connection import initialize_firebase
 
@@ -22,9 +21,6 @@ def _can_modify_purchase(stock_data, user_id):
     return bool(owner_id and actor_id and owner_id == actor_id and actor_id != "manager")
 
 
-
-
-
 def get_user_details(user_id):
 
     try:
@@ -34,7 +30,6 @@ def get_user_details(user_id):
         users_ref = db.reference("users")
 
         user_data = users_ref.child(user_id).child("personal").get()
-
 
 
         # print(users_ref.child(user_id).child("personal").get())
@@ -52,9 +47,7 @@ def get_user_details(user_id):
         }
 
 
-
         return user_details
-
 
 
     except Exception as e:
@@ -74,11 +67,9 @@ def get_stocks_from_db():
         ref = db.reference("stocks")
 
 
-
         # Fetch all stocks ordered by stock_id
 
         stocks = ref.get()
-
 
 
         return stocks if stocks else {}
@@ -118,10 +109,7 @@ def _next_id(counter, prefix):
 
     n = db.reference(f"counters/{counter}").transaction(lambda cur: (cur or 0) + 1)
 
-    return f"{datetime.now().year % 100}{prefix}{int(n):07d}"
-
-
-
+    return f"{clock.year2()}{prefix}{int(n):07d}"
 
 
 def generate_purchase_id():
@@ -129,15 +117,9 @@ def generate_purchase_id():
     return _next_id("purchases", "p")
 
 
-
-
-
 def generate_transaction_id():
 
     return _next_id("transactions", "t")
-
-
-
 
 
 def add_transaction_to_db(user_id, purchased_id, company_name, ticker, quantity, price_per_stock, action, mode):
@@ -149,15 +131,12 @@ def add_transaction_to_db(user_id, purchased_id, company_name, ticker, quantity,
         transaction_id = generate_transaction_id()
 
 
-
         if not transaction_id:
 
             return False
 
 
-
         total_value = round(float(quantity) * float(price_per_stock), 2)
-
 
 
         ref.child(transaction_id).set({
@@ -182,10 +161,9 @@ def add_transaction_to_db(user_id, purchased_id, company_name, ticker, quantity,
 
             "mode": mode,
 
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": clock.stamp(),
 
         })
-
 
 
         return True
@@ -207,11 +185,9 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
         ref = db.reference("purchases")
 
 
-
         # Generate unique purchase ID
 
         purchase_id = generate_purchase_id()
-
 
 
         # Store purchase data in Realtime Database
@@ -230,13 +206,13 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
 
             "purchase_id": purchase_id,
 
-            "purchased_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "purchased_on": clock.stamp(),
 
             "purchased_by": user_id,  # There may be possiblity manager will purhcase the stock for user
 
             "sold": False,
 
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
 
             "updated_by": user_id,  # Manager can sell the stock for user
 
@@ -251,7 +227,6 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
             "target_set": False,
 
         })
-
 
 
         add_transaction_to_db(
@@ -275,7 +250,6 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
         )
 
 
-
         return True
 
     except Exception as e:
@@ -285,11 +259,9 @@ def add_purchase_to_db(user_id, company_name, quantity, price_per_stock, total_c
         return False
 
 
-
 def get_purchased_stocks(user_id):
 
     try:
-
 
 
         stocks_ref = db.reference("stocks")
@@ -297,7 +269,6 @@ def get_purchased_stocks(user_id):
         all_purchases = _rows_for_user("purchases", user_id)
 
         all_stocks = stocks_ref.get() or {}
-
 
 
         def normalize_sector(value):
@@ -311,7 +282,6 @@ def get_purchased_stocks(user_id):
             return text
 
 
-
         stock_sector_map = {
 
             sid: normalize_sector((s or {}).get("sector", "Unknown"))
@@ -319,7 +289,6 @@ def get_purchased_stocks(user_id):
             for sid, s in all_stocks.items()
 
         }
-
 
 
         ticker_sector_map = {
@@ -333,7 +302,6 @@ def get_purchased_stocks(user_id):
         }
 
 
-
         portfolio = {}
 
         for purchase_id, purchase in all_purchases.items():
@@ -341,7 +309,6 @@ def get_purchased_stocks(user_id):
             if purchase.get("user_id") != user_id or purchase.get("sold"):
 
                 continue
-
 
 
             stock_id = purchase.get("stock_id")
@@ -353,7 +320,6 @@ def get_purchased_stocks(user_id):
             if sector == "Unknown" and ticker:
 
                 sector = ticker_sector_map.get(ticker, "Unknown")
-
 
 
             portfolio[purchase_id] = {
@@ -383,7 +349,6 @@ def get_purchased_stocks(user_id):
             }
 
 
-
         return portfolio
 
     except Exception as e:
@@ -403,11 +368,9 @@ def get_stock_data(purchased_id):
         ref = db.reference("purchases")
 
 
-
         # Fetch stock data for the given purchase id
 
         stock_data = ref.child(purchased_id).get()
-
 
 
         return stock_data if stock_data else {}
@@ -419,11 +382,9 @@ def get_stock_data(purchased_id):
         return None
 
 
-
 def update_stock_data(purchased_id, price_per_stock, quantity, user_id):
 
     try:
-
 
 
         if quantity <= 0:
@@ -439,13 +400,11 @@ def update_stock_data(purchased_id, price_per_stock, quantity, user_id):
             ref = db.reference("purchases")
 
 
-
             stock_data = ref.child(purchased_id).get()
 
             if not stock_data or stock_data.get("sold", False):
 
                 return False
-
 
 
             if not _can_modify_purchase(stock_data, user_id):
@@ -455,17 +414,15 @@ def update_stock_data(purchased_id, price_per_stock, quantity, user_id):
                 return False
 
 
-
             ref.child(purchased_id).update({
                 "quantity": quantity,
                 "price_per_stock": price_per_stock,
                 "total_cost": price_per_stock * quantity,
                 "updated_by": user_id,
 
-                "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_on": clock.stamp(),
 
             })
-
 
 
             return True
@@ -487,13 +444,11 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
         ref = db.reference("purchases")
 
 
-
         stock_data = ref.child(purchased_id).get()
 
         if not stock_data or stock_data.get("sold", False):
 
             return False
-
 
 
         if not _can_modify_purchase(stock_data, user_id):
@@ -503,13 +458,11 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
             return False
 
 
-
         quantity = int(stock_data.get("quantity", 0) or 0)
 
         company_name = stock_data.get("company_name", "")
 
         ticker = stock_data.get("ticker", "")
-
 
 
         # Update stock data for the given stock_id to mark it as sold
@@ -524,10 +477,9 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
 
             "updated_by": user_id,
 
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
 
         })
-
 
 
         add_transaction_to_db(
@@ -551,7 +503,6 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
         )
 
 
-
         return True
 
     except Exception as e:
@@ -559,7 +510,6 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
         print(f"Error selling stock: {e}")
 
         return False
-
 
 
 def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
@@ -581,11 +531,9 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
         return 0
 
 
-
     target = str(ticker or "").strip().upper()
 
     rows = _rows_for_user("purchases", user_id)
-
 
 
     open_rows = [(k, v) for k, v in rows.items()
@@ -593,7 +541,6 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
                  and str(v.get("ticker", "")).strip().upper() == target]
 
     open_rows.sort(key=lambda kv: str(kv[1].get("purchased_on", "")))
-
 
 
     ref = db.reference("purchases")
@@ -607,11 +554,9 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
             break
 
 
-
         if not _can_modify_purchase(row, user_id):
 
             continue
-
 
 
         have = int(row.get("quantity", 0) or 0)
@@ -621,9 +566,7 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
             continue
 
 
-
         remaining = want - sold
-
 
 
         if have <= remaining:
@@ -633,7 +576,6 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
                 sold += have
 
             continue
-
 
 
         # Partial: shrink the lot rather than closing it, and cost basis has to
@@ -651,7 +593,7 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
 
             "updated_by": user_id,
 
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
 
         })
 
@@ -678,7 +620,6 @@ def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
         sold += remaining
 
 
-
     return sold
 
 
@@ -693,7 +634,6 @@ def get_live_price_from_db(ticker):
         live_price = stock.history(period="1d")
 
 
-
         return live_price
 
     except Exception as e:
@@ -701,9 +641,6 @@ def get_live_price_from_db(ticker):
         print(f"Error fetching live price: {e}")
 
         return 0.0
-
-
-
 
 
 def set_target_price(purchased_id, target_price, user_id):
@@ -717,11 +654,9 @@ def set_target_price(purchased_id, target_price, user_id):
             return False
 
 
-
         ref = db.reference("purchases")
 
         stock_data = ref.child(purchased_id).get()
-
 
 
         if not stock_data or stock_data.get("sold", False):
@@ -729,13 +664,11 @@ def set_target_price(purchased_id, target_price, user_id):
             return False
 
 
-
         if not _can_modify_purchase(stock_data, user_id):
 
             print("Unauthorized target update attempt blocked.")
 
             return False
-
 
 
         ref.child(purchased_id).update({
@@ -746,10 +679,9 @@ def set_target_price(purchased_id, target_price, user_id):
 
             "updated_by": user_id,
 
-            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_on": clock.stamp(),
 
         })
-
 
 
         return True
@@ -761,15 +693,11 @@ def set_target_price(purchased_id, target_price, user_id):
         return False
 
 
-
-
-
 def get_user_transactions(user_id):
 
     try:
 
         all_transactions = _rows_for_user("transactions", user_id)
-
 
 
         records = []
@@ -779,7 +707,6 @@ def get_user_transactions(user_id):
             if txn.get("user_id") != user_id:
 
                 continue
-
 
 
             records.append({
@@ -807,7 +734,6 @@ def get_user_transactions(user_id):
             })
 
 
-
         records.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
         return records
@@ -817,9 +743,6 @@ def get_user_transactions(user_id):
         print(f"Error fetching transaction history: {e}")
 
         return []
-
-
-
 
 
 if __name__ == "__main__":
