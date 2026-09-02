@@ -1,5 +1,6 @@
 """Identity resolution. Email/password and Google both land here."""
 
+import requests
 from firebase_admin import db
 
 from database.connection import initialize_firebase, _setting
@@ -37,6 +38,23 @@ def is_manager(email):
     raw = _setting("manager_emails") or _setting("manager_email") or ""
     allowed = {e.strip().lower() for e in str(raw).split(",") if e.strip()}
     return str(email or "").strip().lower() in allowed
+
+
+def authenticate_manager(email, password):
+    """Password check for the manager portal only -- managers have no RTDB
+    user record, so this never touches `users/`, unlike authenticate_user()."""
+    if not is_manager(email):
+        return False
+    try:
+        api_key = _setting("API_KEY")
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
+        response = requests.post(url, json={
+            "email": email, "password": password, "returnSecureToken": True,
+        }, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Error authenticating manager: {e}")
+        return False
 
 
 def provision_google_user(email, name):

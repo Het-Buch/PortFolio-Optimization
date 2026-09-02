@@ -204,13 +204,14 @@ def _council(result):
             st.caption("Weights above are unaffected — they come from the optimizer.")
             return
 
-        icon = {"increase": "🟢", "decrease": "🔴", "hold": "⚪"}
+        stance_kind = {"increase": "good", "decrease": "bad"}
         cols = st.columns(len(analysis["stances"]))
         for col, s in zip(cols, analysis["stances"]):
             with col:
                 with st.container(border=True):
-                    st.markdown(f"{icon.get(s['stance'], '⚪')} **{s['role'].title()}**")
-                    st.caption(f"{s['stance'].upper()} · {s['confidence']}% confidence")
+                    st.markdown(f"**{s['role'].title()}**")
+                    st.html(ui.pill(s["stance"].upper(), stance_kind.get(s["stance"], "neutral")))
+                    st.caption(f"{s['confidence']}% confidence")
                     with st.expander("Reasoning"):
                         for point in s.get("points") or []:
                             st.write(f"- {point}")
