@@ -318,6 +318,22 @@ client_secret       = "..."
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 ```
 
+> **Deploying? `redirect_uri` must change with it.** The value above only works
+> locally. A deployed app needs its real URL in **two** places, matching
+> character-for-character:
+>
+> 1. **Google Cloud Console** → APIs & Services → Credentials → your OAuth 2.0
+>    Client ID → *Authorized redirect URIs* → add
+>    `https://<your-app>.streamlit.app/oauth2callback`. Keep the localhost entry
+>    as well — one client can hold both, so local dev keeps working.
+> 2. **Streamlit Cloud** → app → Settings → Secrets → the same `[auth]` /
+>    `[auth.google]` block, with `redirect_uri` set to that deployed URL.
+>
+> Your local `secrets.toml` stays on localhost; Cloud reads its own secrets, so
+> the two coexist without swapping values. A mismatch fails with
+> `redirect_uri_mismatch`, which does not say which side is wrong. Console
+> changes can take a few minutes to propagate.
+
 ### Step 5 — Add Firebase Credentials
 Place your Firebase Admin SDK JSON file in the project root and ensure the filename matches the reference in `database/connection.py`. See [Firebase Setup](#-firebase-setup) for how to generate this file.
 
