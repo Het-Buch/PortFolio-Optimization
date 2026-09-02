@@ -60,10 +60,16 @@ def login():
             if not email or not password:
                 st.warning("Enter both email and password.")
             else:
-                user_id = authenticate_user(email, password)
+                user_id, reason = authenticate_user(email, password)
                 if user_id:
                     _enter(user_id)
-                st.error("Invalid credentials")
+                elif reason == "blocked":
+                    st.error("This account is blocked. Contact the manager.")
+                elif reason == "no_record":
+                    st.error("This account is not fully set up. Contact the "
+                             "manager to have your profile restored.")
+                else:
+                    st.error("Invalid credentials")
 
         if _google_configured():
             if st.button("Continue with Google", width="stretch"):

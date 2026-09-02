@@ -1,7 +1,7 @@
 import streamlit as st
 
 from frontend import ui
-from services.cache import cached_stocks, cached_portfolio
+from services.cache import cached_stocks, cached_portfolio, cached_transactions
 from database.curd import add_purchase_to_db
 from services.stock_services import get_prices, normalize_ticker, display_symbol
 
@@ -113,6 +113,7 @@ def buy():
 
             if success:
                 cached_portfolio.clear()
+                cached_transactions.clear()  # a buy writes a transaction row too
                 st.toast(f"Purchased {quantity} stocks of {company_name}")
                 st.rerun()
             else:

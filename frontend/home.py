@@ -1,6 +1,6 @@
 import plotly.graph_objects as go
 import streamlit as st
-from services.cache import cached_user, cached_portfolio
+from services.cache import cached_user, cached_portfolio, cached_transactions
 from services.stock_services import get_prices, display_symbol
 from database.curd import sell_stock
 
@@ -128,6 +128,7 @@ def home():
 
     if auto_sold:
         cached_portfolio.clear()
+        cached_transactions.clear()  # a sell writes a transaction row too
         st.success("Auto-sell executed for: " + ", ".join(auto_sold))
         st.rerun()
 
@@ -238,5 +239,6 @@ def home():
 
             if success:
                 cached_portfolio.clear()
+                cached_transactions.clear()  # a sell writes a transaction row too
                 st.toast("Stock sold successfully")
                 st.rerun()
