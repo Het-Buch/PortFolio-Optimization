@@ -17,9 +17,26 @@ BLUE_DIM = "#60A5FA"
 RED = "#F43F5E"
 SLATE = "#64748B"
 
-# Categorical order for pies and multi-series charts: alternate blue/green so
-# adjacent slices always separate, then fall back to tints.
-SERIES = [BLUE, GREEN, BLUE_DIM, GREEN_DIM, "#818CF8", "#2DD4BF", "#93C5FD", "#6EE7B7"]
+# Categorical order for pies and multi-series charts. 12 entries, because the
+# catalog already has 10 sectors -- at 8 the sequence wrapped and two slices
+# came out the same colour. Adjacent entries alternate cool-blue and green and
+# also step in lightness, so neighbouring slices separate on hue *and* value,
+# not hue alone (a pure blue/green alternation still reads flat when six of the
+# twelve are the same blue at different opacities).
+SERIES = [
+    BLUE,        # 3B82F6  blue
+    GREEN,       # 10B981  emerald
+    "#A78BFA",   # violet
+    GREEN_DIM,   # 34D399  mint
+    BLUE_DIM,    # 60A5FA  sky
+    "#14B8A6",   # teal
+    "#818CF8",   # indigo
+    "#6EE7B7",   # pale green
+    "#0EA5E9",   # cyan
+    "#22C55E",   # green
+    "#93C5FD",   # pale blue
+    "#2DD4BF",   # turquoise
+]
 
 
 def rgba(hex_color, alpha):
