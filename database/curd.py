@@ -562,6 +562,126 @@ def sell_stock(purchased_id, user_id, current_price, mode="manual"):
 
 
 
+def sell_quantity(user_id, ticker, quantity, price, mode="auto"):
+
+    """Sell N shares of one ticker, FIFO across purchase rows.
+
+    sell_stock() closes a whole row, which cannot express "reduce 10 shares to
+    7" -- the operation a rebalance actually needs. Oldest lots go first; the
+    lot that would overshoot is reduced in place instead of being closed.
+
+    Returns the number of shares actually sold.
+
+    """
+
+    want = int(quantity or 0)
+
+    if want <= 0:
+
+        return 0
+
+
+
+    target = str(ticker or "").strip().upper()
+
+    rows = _rows_for_user("purchases", user_id)
+
+
+
+    open_rows = [(k, v) for k, v in rows.items()
+                 if v and not v.get("sold")
+                 and str(v.get("ticker", "")).strip().upper() == target]
+
+    open_rows.sort(key=lambda kv: str(kv[1].get("purchased_on", "")))
+
+
+
+    ref = db.reference("purchases")
+
+    sold = 0
+
+    for pid, row in open_rows:
+
+        if sold >= want:
+
+            break
+
+
+
+        if not _can_modify_purchase(row, user_id):
+
+            continue
+
+
+
+        have = int(row.get("quantity", 0) or 0)
+
+        if have <= 0:
+
+            continue
+
+
+
+        remaining = want - sold
+
+
+
+        if have <= remaining:
+
+            if sell_stock(pid, user_id, price, mode=mode):
+
+                sold += have
+
+            continue
+
+
+
+        # Partial: shrink the lot rather than closing it, and cost basis has to
+        # shrink with it or the remaining shares look free.
+
+        unit_cost = float(row.get("price_per_stock", 0) or 0)
+
+        left = have - remaining
+
+        ref.child(pid).update({
+
+            "quantity": left,
+
+            "total_cost": unit_cost * left,
+
+            "updated_by": user_id,
+
+            "updated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        })
+
+        add_transaction_to_db(
+
+            user_id=user_id,
+
+            purchased_id=pid,
+
+            company_name=row.get("company_name", ""),
+
+            ticker=row.get("ticker", ""),
+
+            quantity=remaining,
+
+            price_per_stock=price,
+
+            action="SELL",
+
+            mode=mode,
+
+        )
+
+        sold += remaining
+
+
+
+    return sold
+
+
 def get_live_price_from_db(ticker):
 
     try:
