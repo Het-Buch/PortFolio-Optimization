@@ -1,6 +1,7 @@
 mlruns/
 .env
 .streamlit/secrets.toml
+.streamlit/secrets*.toml
 *firebase-adminsdk*.json
 backup_firebase_*.json
 __pycache__/
