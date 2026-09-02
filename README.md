@@ -324,7 +324,7 @@ server_metadata_url = "https://accounts.google.com/.well-known/openid-configurat
 >
 > 1. **Google Cloud Console** → APIs & Services → Credentials → your OAuth 2.0
 >    Client ID → *Authorized redirect URIs* → add
->    `https://<your-app>.streamlit.app/oauth2callback`. Keep the localhost entry
+>    `https://agentic-ai-portfolio.streamlit.app/oauth2callback`. Keep the localhost entry
 >    as well — one client can hold both, so local dev keeps working.
 > 2. **Streamlit Cloud** → app → Settings → Secrets → the same `[auth]` /
 >    `[auth.google]` block, with `redirect_uri` set to that deployed URL.
@@ -531,7 +531,7 @@ claim, results are reported as measured.
 
 ---
 
-Live Demo - [Launch Portfolio Optimization App](https://portfolio-optimization-agentic-ai.streamlit.app/)
+Live Demo - [Launch Portfolio Optimization App](https://agentic-ai-portfolio.streamlit.app/)
 
 ---
 > ⚠️ **Disclaimer:** This system provides AI-generated investment insights for educational purposes only. It does not guarantee financial returns and does not execute trades automatically. Always consult a certified financial advisor before making investment decisions.
