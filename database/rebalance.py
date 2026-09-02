@@ -55,6 +55,7 @@ def create_plan(user_id, orders, algorithm=""):
         "orders": [{
             "ticker": str(o.get("ticker", "")).strip().upper(),
             "company": o.get("company", ""),
+            "stock_id": o.get("stock_id", ""),
             "held_at_plan": int(o.get("held", 0) or 0),
             "target": int(o.get("target", 0) or 0),
             "delta": int(o.get("delta", 0) or 0),

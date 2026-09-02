@@ -27,7 +27,13 @@ def _holdings(active):
         row = out.setdefault(ticker, {
             "company": s.get("company_name") or display_symbol(ticker),
             "ticker": ticker, "quantity": 0, "total_cost": 0.0,
+            # Carried through to any scheduled buy: home.py groups holdings by
+            # stock_id and falls back to ticker, so a lot bought without one
+            # shows up as a second, separate holding of the same stock.
+            "stock_id": s.get("stock_id") or "",
         })
+        if not row["stock_id"]:
+            row["stock_id"] = s.get("stock_id") or ""
         row["quantity"] += int(s.get("quantity", 0) or 0)
         row["total_cost"] += float(s.get("total_cost", 0) or 0)
     return list(out.values())
@@ -80,7 +86,8 @@ def optimize():
                                 "position_value": h["position_value"]}
                                for h in holdings]})
             st.session_state["holdings"] = {
-                h["ticker"]: {"quantity": h["quantity"], "company": h["company"]}
+                h["ticker"]: {"quantity": h["quantity"], "company": h["company"],
+                              "stock_id": h.get("stock_id", "")}
                 for h in holdings}
             st.session_state["prices"] = {h["ticker"]: h["price"] for h in holdings}
         st.session_state.pop("council", None)

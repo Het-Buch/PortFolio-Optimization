@@ -113,6 +113,9 @@ def rebalance_orders(weights, holdings, prices):
         orders.append({
             "ticker": ticker,
             "company": holding.get("company", ticker),
+            # Carried so a scheduled buy lands under the same catalog id the
+            # user's existing lots use, instead of grouping as a separate stock.
+            "stock_id": holding.get("stock_id", ""),
             "price": price,
             "held": held,
             "target": target_shares,
