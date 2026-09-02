@@ -7,6 +7,33 @@ from database.curd import sell_stock
 from frontend import ui
 
 
+def _pending_rebalance_notice(user_id):
+    """Something that will trade on its own must be visible from the home page,
+    not only from the page it was scheduled on."""
+    from database import rebalance
+
+    try:
+        pending = rebalance.pending_for(user_id)
+    except Exception:
+        return
+    if not pending:
+        return
+
+    plan = pending[0]
+    orders = plan.get("orders", [])
+    buys = sum(1 for o in orders if int(o.get("delta", 0) or 0) > 0)
+    sells = sum(1 for o in orders if int(o.get("delta", 0) or 0) < 0)
+
+    with st.container(border=True):
+        c1, c2 = st.columns([4, 1])
+        c1.markdown("**:material/event_repeat: Rebalance scheduled**")
+        c1.caption(f"{buys} buy / {sells} sell order(s) execute automatically "
+                   "after the next market close. Cancel any time before then.")
+        if c2.button("Review", width="stretch", icon=":material/tune:"):
+            st.session_state["page"] = "optimize"
+            st.rerun()
+
+
 def home():
 
     if "user" not in st.session_state:
@@ -20,8 +47,10 @@ def home():
     user_details = cached_user(user_id)
     name = user_details.get("name")
 
-    st.title(f"Hi, {name} 👋")
+    st.title(f"Hi, {name}")
     st.caption("Your portfolio at a glance.")
+
+    _pending_rebalance_notice(user_id)
 
     # Navigation lives in landing.py's role-driven sidebar. A second copy here
     # duplicated every button, and its Logout skipped session_ui.end(), leaving
