@@ -8,7 +8,7 @@ USER_NAV = [("Home", "home", ":material/dashboard:"),
             ("Sectors", "sector_user", ":material/donut_large:"),
             ("Profile", "profile", ":material/person:")]
 
-MANAGER_NAV = [("Dashboard", "manager_home", ":material/analytics:"),
+MANAGER_NAV = [("Dashboard", "manager_home", ":material/shield_person:"),
                ("Add Stock", "add_stock", ":material/add_circle:"),
                ("Stocks", "show_stocks", ":material/inventory_2:"),
                ("Users", "show_users", ":material/group:"),
@@ -22,6 +22,7 @@ PAGES = {
     "sector_user": ("frontend.sector_user", "sector_user"),
     "edit_stock": ("frontend.edit_stock", "edit_stock"),
     "login": ("frontend.login", "login"),
+    "login_manager": ("frontend.login_manager", "login_manager"),
     "register": ("frontend.register", "register"),
     "manager_home": ("frontend.manger_home", "manager_home"),
     "add_stock": ("frontend.add_stock", "add_stock"),
@@ -49,7 +50,10 @@ def _sidebar():
         return
 
     is_manager = user == "manager"
-    st.sidebar.title("Manager" if is_manager else "Menu")
+    if is_manager:
+        st.sidebar.markdown("## :material/shield_person: Manager")
+    else:
+        st.sidebar.title("Menu")
 
     current = st.session_state.get("page")
     for label, page, icon in (MANAGER_NAV if is_manager else USER_NAV):
@@ -173,9 +177,9 @@ def _landing():
                 st.caption(body)
 
     st.divider()
-    # No privilege granted here -- the manager flag is set only after authentication.
-    if st.button("Manager login", icon=":material/admin_panel_settings:"):
-        go("login")
+    # Separate route -- database.auth.is_manager() gates it, this page never does.
+    if st.button("Manager login", icon=":material/shield_person:"):
+        go("login_manager")
 
 
 def landing():

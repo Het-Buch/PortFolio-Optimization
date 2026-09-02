@@ -1,4 +1,6 @@
-"""Login: email/password or Google. Both resolve to the same user_id."""
+"""User login only. Email/password or Google, both resolve to a user_id.
+Managers have a separate route (frontend/login_manager.py) -- this page must
+never grant manager access, even if a manager's Google account signs in here."""
 
 import streamlit as st
 
@@ -15,15 +17,14 @@ def _google_configured():
         return False
 
 
-def _enter(user_id, manager=False):
-    start(user_id or "manager", is_manager=manager)
-    st.session_state["page"] = "manager_home" if manager else "home"
-    if not manager:
-        # Pay the cold-cache cost here, behind the login spinner, instead of
-        # mid-render on the first page the user lands on.
-        from services.cache import warm
-        with st.spinner("Loading your portfolio..."):
-            warm(user_id)
+def _enter(user_id):
+    start(user_id)
+    st.session_state["page"] = "home"
+    # Pay the cold-cache cost here, behind the login spinner, instead of
+    # mid-render on the first page the user lands on.
+    from services.cache import warm
+    with st.spinner("Loading your portfolio..."):
+        warm(user_id)
     st.rerun()
 
 
@@ -32,7 +33,9 @@ def login():
     if _google_configured() and getattr(st.user, "is_logged_in", False):
         email = st.user.email
         if is_manager(email):
-            _enter(None, manager=True)
+            st.error("This is a manager account. Use the manager portal to log in.")
+            st.logout()
+            return
         user_id = sign_in_with_google(email, getattr(st.user, "name", ""))
         if user_id:
             _enter(user_id)

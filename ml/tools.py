@@ -6,7 +6,7 @@ import numpy as np
 import streamlit as st
 
 from ml import optimizers
-from services.stock_services import get_history, get_prices, normalize_ticker, display_symbol
+from services.stock_services import get_history, get_prices, display_symbol
 
 # Results are trimmed before they enter context — raw frames blow the token budget.
 MAX_HEADLINES = 5
