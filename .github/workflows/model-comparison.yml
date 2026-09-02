@@ -27,6 +27,11 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # Only this job needs CatBoost, and it is 330 MB. Keeping it out of
+      # requirements.txt keeps the app's deploy slim; installing it here keeps
+      # the comparison at the full 25 models of the report's Table 3.3.
+      - run: pip install catboost==1.2.10
+
       - run: |
           python -m jobs.model_comparison \
             --tickers "${{ github.event.inputs.tickers || '8' }}" \
