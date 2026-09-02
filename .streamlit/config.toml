@@ -43,9 +43,11 @@ chartCategoricalColors = [
   "#3B82F6", "#10B981", "#A78BFA", "#34D399", "#60A5FA", "#14B8A6",
   "#818CF8", "#6EE7B7", "#0EA5E9", "#22C55E", "#93C5FD", "#2DD4BF",
 ]
+# Exactly 10 values -- Streamlit rejects any other length and silently falls
+# back to its own scale.
 chartSequentialColors = [
-  "#12243F", "#173B6B", "#1D4ED8", "#2563EB", "#3B82F6",
-  "#60A5FA", "#93C5FD", "#BFDBFE",
+  "#0E1E38", "#12243F", "#173B6B", "#1D4ED8", "#2563EB",
+  "#3B82F6", "#60A5FA", "#93C5FD", "#BFDBFE", "#DBEAFE",
 ]
 
 [theme.sidebar]

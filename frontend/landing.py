@@ -175,22 +175,31 @@ def _landing():
                 st.markdown(f"**{title}**")
                 st.caption(body)
 
-    st.divider()
-    # Separate route -- database.auth.is_manager() gates it, this page never does.
-    if st.button("Manager login", icon=":material/shield_person:"):
-        go("login_manager")
+    st.caption("Staff access is at /?manager=1")
 
 
 def landing():
     st.session_state.setdefault("page", "landing")
+
+    # The manager portal is reached by URL (/?manager=1), not by a button on the
+    # page every investor sees. Only redirects while logged out, so it cannot
+    # yank a signed-in user off their own page.
+    if st.query_params.get("manager") and not st.session_state.get("user"):
+        st.session_state["page"] = "login_manager"
 
     # One injection here covers every page the router dispatches to.
     from frontend.ui import inject
     inject()
 
     # Rehydrate from cookie so a refresh does not bounce the user to login.
+    # The cookie component reports {} on the first run of a fresh page load and
+    # only sends the real cookies on the rerun that follows, so a refresh always
+    # starts on "landing" -- send a restored session back to its own home rather
+    # than leaving it staring at the logged-out page.
     from frontend.session_ui import restore
-    restore()
+    if restore() and st.session_state.get("page") == "landing":
+        st.session_state["page"] = (
+            "manager_home" if st.session_state.get("user") == "manager" else "home")
 
     page = st.session_state["page"]
 
