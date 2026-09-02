@@ -3,7 +3,7 @@
 import streamlit as st
 
 st.set_page_config(page_title="Portfolio Management System",
-                   page_icon="📈", layout="wide")
+                   page_icon=":material/monitoring:", layout="wide")
 
 
 def main():

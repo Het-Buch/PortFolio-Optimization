@@ -46,50 +46,116 @@ def rgba(hex_color, alpha):
 
 
 def inject():
-    """Global styling. Called once per page, before anything renders."""
+    """Global styling. Called once per page, before anything renders.
+
+    Typography and the colour base live in .streamlit/config.toml (theme.font
+    accepts a webfont URL; an st.html <link> would be stripped by DOMPurify).
+    This covers only what config cannot express -- layout, states, and chrome.
+    """
     st.html("""
 <style>
   /* Tighten Streamlit's default vertical rhythm -- the stock spacing is what
      makes a page of widgets read as a form rather than a product. */
-  .block-container {padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1180px;}
-  h1 {font-weight: 700; letter-spacing: -0.02em;}
-  h2, h3 {font-weight: 650; letter-spacing: -0.01em; margin-top: .4rem;}
+  .block-container {padding-top: 2.4rem; padding-bottom: 3rem; max-width: 1180px;}
+  h1 {font-weight: 700; letter-spacing: -0.03em;}
+  h2, h3 {font-weight: 600; letter-spacing: -0.015em; margin-top: .4rem;}
+
+  /* A single soft light source behind the page. Flat charcoal everywhere is
+     the other half of the stock-Streamlit look. */
+  .stApp {
+    background-image:
+      radial-gradient(900px 420px at 18% -8%, rgba(59,130,246,.13), transparent 60%),
+      radial-gradient(760px 380px at 88% -14%, rgba(16,185,129,.10), transparent 62%);
+    background-attachment: fixed;
+  }
 
   /* Cards: bordered containers get a subtle lift and a hover state. */
   div[data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 14px;
-    transition: border-color .15s ease, transform .15s ease;
+    background: linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,0));
+    transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
   }
   div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    border-color: rgba(59,130,246,.45);
+    border-color: rgba(59,130,246,.42);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 22px -12px rgba(0,0,0,.75);
   }
 
-  /* Metrics read as the headline number they are. */
-  div[data-testid="stMetricValue"] {font-size: 1.55rem; font-weight: 680;}
-  div[data-testid="stMetricLabel"] {opacity: .72; font-size: .82rem;
-    text-transform: uppercase; letter-spacing: .04em;}
+  /* Metrics read as the headline number they are. Tabular figures so digits
+     line up column-to-column -- the app is mostly money. */
+  div[data-testid="stMetricValue"] {
+    font-size: 1.6rem; font-weight: 650; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+  }
+  div[data-testid="stMetricLabel"] {opacity: .66; font-size: .74rem;
+    text-transform: uppercase; letter-spacing: .07em; font-weight: 600;}
 
   /* Buttons: rounded, with a real primary colour rather than Streamlit red. */
-  .stButton > button {border-radius: 10px; font-weight: 600;}
+  .stButton > button {font-weight: 600;}
   .stButton > button[kind="primary"] {
     background: linear-gradient(135deg, #3B82F6, #10B981);
     border: none; color: #fff;
+    box-shadow: 0 6px 18px -10px rgba(59,130,246,.9);
   }
-  .stButton > button[kind="primary"]:hover {filter: brightness(1.07);}
+  .stButton > button[kind="primary"]:hover {filter: brightness(1.08);}
 
-  /* Inputs */
-  .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] > div {
-    border-radius: 10px;
+  /* Sidebar as real navigation, not a stack of form buttons: flush-left
+     labels, an accent rail on the active page, quiet everything else. */
+  section[data-testid="stSidebar"] {border-right: 1px solid rgba(148,163,184,.10);}
+  section[data-testid="stSidebar"] .stButton > button {
+    justify-content: flex-start; text-align: left;
+    background: transparent; border: 1px solid transparent;
+    border-left: 2px solid transparent; border-radius: 8px;
+    color: rgba(226,232,240,.72); font-weight: 550; padding-left: .7rem;
   }
+  section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(148,163,184,.09); color: #E2E8F0;
+  }
+  section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: linear-gradient(90deg, rgba(59,130,246,.18), rgba(59,130,246,0));
+    border-left: 2px solid #3B82F6; color: #fff; box-shadow: none;
+  }
+
+  /* Brand lockup at the top of the sidebar. */
+  .brand {display:flex; align-items:center; gap:.6rem; padding:.15rem .1rem 1rem;}
+  .brand .mark {width:30px; height:30px; flex:none;}
+  .brand .name {font-family:"Space Grotesk", system-ui, sans-serif;
+    font-weight:700; font-size:1.02rem; letter-spacing:-.02em; line-height:1.1;}
+  .brand .sub {font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+    opacity:.5; font-weight:600;}
 
   /* Tabs */
   .stTabs [data-baseweb="tab-list"] {gap: .25rem;}
   .stTabs [data-baseweb="tab"] {border-radius: 9px 9px 0 0; font-weight: 600;}
 
   /* Section label used above card groups. */
-  .sec-label {font-size:.78rem; letter-spacing:.09em; text-transform:uppercase;
-    opacity:.6; font-weight:700; margin:.2rem 0 .5rem;}
+  .sec-label {font-size:.74rem; letter-spacing:.1em; text-transform:uppercase;
+    opacity:.55; font-weight:700; margin:.2rem 0 .5rem;}
 </style>
+""")
+
+
+def brand(subtitle="Portfolio"):
+    """Sidebar lockup. Inline SVG so it needs no asset and inherits the theme."""
+    st.sidebar.html(f"""
+<div class="brand">
+  <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="bm" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0%" stop-color="{GREEN}"/><stop offset="100%" stop-color="{BLUE}"/>
+      </linearGradient>
+    </defs>
+    <rect x="1.5" y="1.5" width="29" height="29" rx="9"
+          stroke="url(#bm)" stroke-width="2" opacity=".55"/>
+    <path d="M8 21.5 L13.5 15 L18 18.5 L24 9.5" stroke="url(#bm)" stroke-width="2.6"
+          stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="24" cy="9.5" r="2.6" fill="{GREEN}"/>
+  </svg>
+  <div>
+    <div class="name">Portfolio</div>
+    <div class="sub">{subtitle}</div>
+  </div>
+</div>
 """)
 
 

@@ -50,10 +50,9 @@ def _sidebar():
         return
 
     is_manager = user == "manager"
-    if is_manager:
-        st.sidebar.markdown("## :material/shield_person: Manager")
-    else:
-        st.sidebar.title("Menu")
+
+    from frontend.ui import brand
+    brand("Manager" if is_manager else "Investor")
 
     current = st.session_state.get("page")
     for label, page, icon in (MANAGER_NAV if is_manager else USER_NAV):

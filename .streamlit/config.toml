@@ -11,3 +11,45 @@ magicEnabled = false         # skip AST rewrite that echoes bare expressions
 
 [client]
 showErrorDetails = "none"
+toolbarMode = "minimal"      # no Deploy button / hamburger in the corner
+
+# Typography via config, not CSS: theme.font accepts "<name>:<css url>", which
+# is the supported path for a webfont. An st.html <link> is stripped by
+# DOMPurify (CLAUDE.md gotcha 14), so this is the only way that actually loads.
+[theme]
+base            = "dark"
+font            = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont     = "Space Grotesk:https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+codeFont        = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize    = 15
+baseRadius      = "0.7rem"
+buttonRadius    = "0.6rem"
+linkUnderline   = false
+showWidgetBorder = true
+
+# Deep navy rather than Streamlit's default near-black -- the default dark is
+# the single most recognisable "this is a stock Streamlit app" tell.
+backgroundColor          = "#0B1120"
+secondaryBackgroundColor = "#131D33"
+textColor                = "#E2E8F0"
+borderColor              = "#22304B"
+primaryColor             = "#3B82F6"
+linkColor                = "#60A5FA"
+codeBackgroundColor      = "#0F1A2E"
+
+# Same list as frontend/ui.py SERIES, so Plotly/Altair/Vega pick it up even
+# where a chart does not pass colors explicitly.
+chartCategoricalColors = [
+  "#3B82F6", "#10B981", "#A78BFA", "#34D399", "#60A5FA", "#14B8A6",
+  "#818CF8", "#6EE7B7", "#0EA5E9", "#22C55E", "#93C5FD", "#2DD4BF",
+]
+chartSequentialColors = [
+  "#12243F", "#173B6B", "#1D4ED8", "#2563EB", "#3B82F6",
+  "#60A5FA", "#93C5FD", "#BFDBFE",
+]
+
+[theme.sidebar]
+backgroundColor          = "#080E1B"
+secondaryBackgroundColor = "#131D33"
+borderColor              = "#1B2942"
+baseRadius               = "0.6rem"
