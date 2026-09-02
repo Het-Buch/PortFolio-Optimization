@@ -91,7 +91,7 @@ Firebase Realtime Database stores `users`, `stocks`, `purchases`, `transactions`
 
 ### 8. 🌐 Web Application (Streamlit)
 A fully interactive multi-page app covering:
-- Landing Page → Login / Register / Manager Login
+- Landing Page → Login / Register (staff portal is a separate route, `/?manager=1`)
 - User Home → Portfolio Overview, Buy/Sell/Edit Stocks
 - Optimization Page → Run algorithms, view pie charts & performance metrics
 - Report Generation → Detailed AI-generated portfolio analysis
@@ -168,7 +168,7 @@ portfolio-optimization/
 │   ├── connection.py                # Firebase connection setup
 │   ├── curd.py                      # Create / Read / Update / Delete
 │   ├── login_user.py                # User login logic
-│   ├── manager_login.py             # Manager login logic
+│   ├── auth.py                      # Identity resolution + manager allowlist
 │   ├── manager_operation.py         # Manager-specific DB operations
 │   └── register_user.py             # User registration logic
 │
@@ -181,7 +181,8 @@ portfolio-optimization/
 │   ├── edit_stock.py                # Edit user holdings
 │   ├── optimize.py                  # Portfolio optimization page
 │   ├── profile.py                   # User profile page
-│   ├── manager_login.py             # Manager login page
+│   ├── login_manager.py             # Manager portal login (separate route)
+│   ├── ui.py                        # Shared design system (palette, cards, charts)
 │   ├── manger_home.py               # Manager dashboard
 │   ├── add_stock.py                 # Add new stock (manager)
 │   ├── sector_manager.py            # Sector wise portfolio distribution of all stocks add by manager
@@ -456,7 +457,7 @@ prices with today's date and double-counting a day in every user's history.
 |---|---|
 | 👤 **New User** | Click "Register" on the landing page |
 | 🔑 **Existing User** | Click "Login" with your credentials |
-| 🛠️ **Manager** | Log in with an email listed in `manager_emails` |
+| 🛠️ **Manager** | Go to `/?manager=1` and sign in with an email listed in `manager_emails`. Password login needs a Firebase Auth account for that email; Google sign-in needs only the allowlist. |
 
 ---
 
