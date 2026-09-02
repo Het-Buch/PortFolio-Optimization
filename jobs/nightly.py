@@ -65,6 +65,68 @@ def auto_sell(purchases, prices):
     return sold
 
 
+def execute_rebalances(prices):
+    """Run every accepted rebalance at today's close.
+
+    Only reached after traded_today() and the stale-price drop, so a plan can
+    never execute on a holiday or against a cached price. Sells run before buys
+    so the portfolio is never momentarily over-allocated.
+    """
+    from database import rebalance
+    from database.curd import add_purchase_to_db, sell_quantity
+
+    done = 0
+    for plan in rebalance.all_pending():
+        plan_id = plan.get("plan_id")
+        user_id = plan.get("user_id")
+        orders = plan.get("orders") or []
+
+        # Every ticker must have a live close. Executing half a plan would
+        # leave the portfolio somewhere the user never agreed to.
+        missing = [o["ticker"] for o in orders
+                   if not prices.get(normalize_ticker(o.get("ticker")))]
+        if missing:
+            log.warning("plan %s deferred: no price for %s", plan_id, ", ".join(missing))
+            continue
+
+        if not rebalance.claim(plan_id):
+            log.info("plan %s already claimed elsewhere", plan_id)
+            continue
+
+        filled, failed = [], []
+        try:
+            for o in sorted(orders, key=lambda x: int(x.get("delta", 0) or 0)):
+                ticker = normalize_ticker(o.get("ticker"))
+                price = float(prices.get(ticker, 0) or 0)
+                delta = int(o.get("delta", 0) or 0)
+
+                if delta < 0:
+                    n = sell_quantity(user_id, ticker, -delta, price, mode="rebalance")
+                    (filled if n == -delta else failed).append(
+                        {"ticker": ticker, "action": "SELL", "shares": n, "price": price})
+                elif delta > 0:
+                    ok = add_purchase_to_db(
+                        user_id=user_id, company_name=o.get("company", ticker),
+                        quantity=delta, price_per_stock=price,
+                        total_cost=round(delta * price, 2),
+                        stock_id=o.get("stock_id", ""), ticker=ticker)
+                    (filled if ok else failed).append(
+                        {"ticker": ticker, "action": "BUY", "shares": delta, "price": price})
+
+            status = rebalance.EXECUTED if not failed else rebalance.FAILED
+            rebalance.finish(plan_id, status, {"filled": filled, "failed": failed,
+                                               "executed_on": _today()})
+            log.info("plan %s %s: %d filled, %d failed",
+                     plan_id, status, len(filled), len(failed))
+            done += 1
+        except Exception as e:
+            rebalance.finish(plan_id, rebalance.FAILED,
+                             {"error": str(e), "filled": filled, "executed_on": _today()})
+            log.error("plan %s crashed: %s", plan_id, e)
+
+    return done
+
+
 def snapshot(purchases, prices):
     """Write today's value per user. Enables real performance charts."""
     totals = {}
@@ -153,7 +215,11 @@ def main():
         return 0
 
     log.info("auto-sold %d", auto_sell(purchases, prices))
-    # Re-read: auto_sell just changed which purchases are open.
+    # After auto-sell: a target hit today should close the position rather than
+    # be rebalanced into. Before the snapshot, so the snapshot reflects the
+    # portfolio the user actually ends the day holding.
+    log.info("rebalances executed %d", execute_rebalances(prices))
+    # Re-read: auto_sell and the rebalances just changed which purchases are open.
     log.info("snapshotted %d users", snapshot(_open_purchases(), prices))
     return 0
 
