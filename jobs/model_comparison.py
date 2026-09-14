@@ -1,6 +1,7 @@
 """Offline model comparison and Optuna tuning. Never runs in the app."""
 
 import argparse
+import gc
 import json
 import time
 import warnings
@@ -127,8 +128,13 @@ def _models():
         "HuberRegressor": scaled(HuberRegressor(max_iter=500)),
         "LassoLars": scaled(LassoLars(alpha=0.001, random_state=SEED)),
         "Lars": scaled(Lars(random_state=SEED)),
+        # n_jobs=1: with n_jobs=-1 this forked a loky worker pool per fold, on
+        # a 29k-row target, that never got torn down between folds/models --
+        # the accumulation OOM-killed two straight CI runs (leaked semlock/
+        # folder warnings at shutdown were the tell). Single-process is slower
+        # but the model itself is already bounded by max_subpopulation.
         "TheilSen": scaled(TheilSenRegressor(random_state=SEED, max_subpopulation=2000,
-                                             n_jobs=-1)),
+                                             n_jobs=1)),
         "RANSAC": scaled(RANSACRegressor(random_state=SEED)),
         "OrthogonalMatchingPursuit": scaled(OrthogonalMatchingPursuit()),
         "PassiveAggressive": scaled(PassiveAggressiveRegressor(random_state=SEED)),
@@ -247,6 +253,16 @@ def _naive_baseline(X, y, target):
             "r2_std": np.std(r2s), "fit_seconds": 0.0}
 
 
+def _release_workers():
+    """Shut down joblib's reusable loky pool and force a GC pass."""
+    try:
+        from joblib.externals.loky import get_reusable_executor
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
+    gc.collect()
+
+
 def evaluate(X, y, target, mf=None):
     """Walk-forward evaluation of every model. Never a random split."""
     tscv = TimeSeriesSplit(n_splits=N_SPLITS)
@@ -312,6 +328,12 @@ def evaluate(X, y, target, mf=None):
                 mf.log_artifact(str(pred_path), "predictions")
         print(f"  {name:26s} R2={np.mean(r2s):+.4f}  RMSE={np.mean(rmses):.4f}  "
               f"dir={np.mean(dirs):.1f}%  {time.time() - t0:.1f}s")
+
+        # n_jobs=-1 estimators leave a loky worker pool running after they
+        # return; across 25 models x 2 targets those pools piled up instead of
+        # freeing, and the accumulation OOM-killed CI. Tear it down every
+        # model, not just the leaky ones -- cheap when there's nothing to do.
+        _release_workers()
 
     return pd.DataFrame(rows).sort_values("rmse").reset_index(drop=True)
 
@@ -697,6 +719,21 @@ def main():
         print(f"  {t:7s}: best={s['best_model']} ({s['best_rmse']:.5f}) "
               f"{s['vs_baseline'].upper()} naive baseline ({s['baseline_rmse']:.5f}), "
               f"{s['improvement_pct']:+.2f}%")
+
+    # Lifts frontend/maintenance.py's app-wide gate. Best-effort: a machine
+    # running this offline with no Firebase creds should still get its CSVs.
+    try:
+        from database.connection import initialize_firebase
+        from database import clock
+        from firebase_admin import db
+        initialize_firebase()
+        db.reference("system/model_comparison").set({
+            "completed_at": clock.stamp(),
+            "targets": list(summary.keys()),
+        })
+        print("Recorded completion to Firebase -- app unlocked.")
+    except Exception as e:
+        print(f"Could not record completion to Firebase (app stays locked): {e}")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,9 @@ jobs:
           python -m jobs.model_comparison \
             --tickers "${{ github.event.inputs.tickers || '8' }}" \
             --trials "${{ github.event.inputs.trials || '40' }}"
+        env:
+          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
+          databaseURL: ${{ secrets.DATABASE_URL }}
 
       - uses: actions/upload-artifact@v4
         if: always()
