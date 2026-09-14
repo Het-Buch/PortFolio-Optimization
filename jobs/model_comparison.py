@@ -139,6 +139,12 @@ class CappedKernelRidge(BaseEstimator, RegressorMixin):
         return self.model_.predict(np.asarray(X))
 
 
+def _fit_rows(model, n):
+    """Rows a model actually trained on -- smaller than n only when capped."""
+    cap = model.get_params().get("cappedkernelridge__max_rows")
+    return int(min(n, cap)) if cap else int(n)
+
+
 def _models():
     """The 25 regressors named in the report's Table 3.3, plus a mean baseline."""
     def scaled(est):
@@ -326,6 +332,7 @@ def evaluate(X, y, target, mf=None):
         row = {"model": name, "r2": np.mean(r2s), "rmse": np.mean(rmses),
                "mae": np.mean(maes), "directional_pct": np.mean(dirs),
                "r2_std": np.std(r2s), "fit_seconds": round(time.time() - t0, 2),
+               "fit_rows": _fit_rows(final, len(X)),
                "model_file": f"models/{target}/{name}.joblib",
                "predictions_file": f"predictions/{target}/{name}.csv"}
         rows.append(row)
@@ -489,7 +496,8 @@ def tune(X, y, names, n_trials, target, mf=None):
             "sampler": "TPESampler",
             "study_name": f"{target}_{name}",
             "storage": f"optuna/{target}.db",
-            "rows": int(len(X)), "features": int(X.shape[1]),
+            "rows": int(len(X)), "fit_rows": _fit_rows(best, len(X)),
+            "features": int(X.shape[1]),
             "generated": datetime.now().isoformat(timespec="seconds"),
         }, indent=2), encoding="utf-8")
 
@@ -598,6 +606,12 @@ def _methodology(tickers, summary):
         "Lagged SMA/EMA/RSI/MACD/Bollinger/volatility/return, five lagged closes, and",
         "cyclical day/month encodings. All indicators are shifted by one day, so no",
         "feature uses information from the bar it predicts.",
+        "",
+        "## Subsampled models",
+        f"- `KernelRidge` trains on at most {CappedKernelRidge().max_rows:,} rows, sampled",
+        "  without replacement. Its kernel matrix is n x n (~7.7 GB at 29k rows), which",
+        "  a CI runner cannot hold. Where a dataset exceeds the cap, its score is not",
+        "  like-for-like with the other models; the `fit_rows` column records this.",
         "",
         "## Tuning",
         "Optuna TPE over the best-ranked tunable models, minimising walk-forward RMSE",
