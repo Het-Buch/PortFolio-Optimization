@@ -14,6 +14,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import (AdaBoostRegressor, BaggingRegressor,
                               ExtraTreesRegressor, GradientBoostingRegressor,
@@ -113,6 +114,31 @@ def _boosters():
     return out
 
 
+class CappedKernelRidge(BaseEstimator, RegressorMixin):
+    """KernelRidge fit on at most `max_rows` sampled rows.
+
+    The kernel matrix is n x n: ~7.7 GB peak on the 29k-row return target,
+    which OOM-killed the CI runner. Kernel methods are not meant for this n.
+    """
+
+    def __init__(self, alpha=1.0, max_rows=5000, random_state=None):
+        self.alpha = alpha
+        self.max_rows = max_rows
+        self.random_state = random_state
+
+    def fit(self, X, y):
+        X, y = np.asarray(X), np.asarray(y)
+        if len(X) > self.max_rows:
+            idx = np.sort(np.random.RandomState(self.random_state)
+                          .choice(len(X), self.max_rows, replace=False))
+            X, y = X[idx], y[idx]
+        self.model_ = KernelRidge(alpha=self.alpha).fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(np.asarray(X))
+
+
 def _models():
     """The 25 regressors named in the report's Table 3.3, plus a mean baseline."""
     def scaled(est):
@@ -128,18 +154,13 @@ def _models():
         "HuberRegressor": scaled(HuberRegressor(max_iter=500)),
         "LassoLars": scaled(LassoLars(alpha=0.001, random_state=SEED)),
         "Lars": scaled(Lars(random_state=SEED)),
-        # n_jobs=1: with n_jobs=-1 this forked a loky worker pool per fold, on
-        # a 29k-row target, that never got torn down between folds/models --
-        # the accumulation OOM-killed two straight CI runs (leaked semlock/
-        # folder warnings at shutdown were the tell). Single-process is slower
-        # but the model itself is already bounded by max_subpopulation.
         "TheilSen": scaled(TheilSenRegressor(random_state=SEED, max_subpopulation=2000,
                                              n_jobs=1)),
         "RANSAC": scaled(RANSACRegressor(random_state=SEED)),
         "OrthogonalMatchingPursuit": scaled(OrthogonalMatchingPursuit()),
         "PassiveAggressive": scaled(PassiveAggressiveRegressor(random_state=SEED)),
         "SGDRegressor": scaled(SGDRegressor(random_state=SEED)),
-        "KernelRidge": scaled(KernelRidge(alpha=1.0)),
+        "KernelRidge": scaled(CappedKernelRidge(alpha=1.0, random_state=SEED)),
         "SVR_rbf": scaled(SVR(kernel="rbf")),
         "LinearSVR": scaled(LinearSVR(random_state=SEED, max_iter=5000)),
         "KNeighbors": scaled(KNeighborsRegressor(n_neighbors=5)),
@@ -329,11 +350,7 @@ def evaluate(X, y, target, mf=None):
         print(f"  {name:26s} R2={np.mean(r2s):+.4f}  RMSE={np.mean(rmses):.4f}  "
               f"dir={np.mean(dirs):.1f}%  {time.time() - t0:.1f}s")
 
-        # n_jobs=-1 estimators leave a loky worker pool running after they
-        # return; across 25 models x 2 targets those pools piled up instead of
-        # freeing, and the accumulation OOM-killed CI. Tear it down every
-        # model, not just the leaky ones -- cheap when there's nothing to do.
-        _release_workers()
+        _release_workers()  # free loky pools and large arrays before the next model
 
     return pd.DataFrame(rows).sort_values("rmse").reset_index(drop=True)
 
@@ -351,8 +368,8 @@ def _suggest(trial, name):
             alpha=trial.suggest_float("alpha", 1e-6, 1e1, log=True),
             l1_ratio=trial.suggest_float("l1_ratio", 0.0, 1.0)))
     if name == "KernelRidge":
-        return make_pipeline(StandardScaler(), KernelRidge(
-            alpha=trial.suggest_float("alpha", 1e-4, 1e2, log=True)))
+        return make_pipeline(StandardScaler(), CappedKernelRidge(
+            alpha=trial.suggest_float("alpha", 1e-4, 1e2, log=True), random_state=SEED))
     if name == "KNeighbors":
         return make_pipeline(StandardScaler(), KNeighborsRegressor(
             n_neighbors=trial.suggest_int("n_neighbors", 2, 50),
