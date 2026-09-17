@@ -33,6 +33,18 @@ PAGES = {
 }
 
 
+def _maintenance_on():
+    """Manual switch only -- never a network read, so it can't fail closed
+    when the thing it's guarding against is a backend outage. Set
+    MAINTENANCE_MODE=true in st.secrets (cloud) or the environment (local/CI).
+    """
+    try:
+        from database.connection import _setting
+        return str(_setting("MAINTENANCE_MODE", "")).strip().lower() in ("1", "true", "yes")
+    except Exception:
+        return False
+
+
 def go(page):
     st.session_state["page"] = page
     st.rerun()
@@ -198,6 +210,13 @@ def landing():
     if restore() and st.session_state.get("page") == "landing":
         st.session_state["page"] = (
             "manager_home" if st.session_state.get("user") == "manager" else "home")
+
+    # Manual outage switch. A logged-in manager still sees the real app, so
+    # the team can verify things while it's on.
+    if _maintenance_on() and st.session_state.get("user") != "manager":
+        from frontend.maintenance import maintenance
+        maintenance()
+        return
 
     page = st.session_state["page"]
 
