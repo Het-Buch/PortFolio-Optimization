@@ -6,6 +6,7 @@ import streamlit as st
 
 from frontend import ui
 from ml.optimization import optimize_portfolio, rebalance_orders
+from ml.optimizers import MAX_WEIGHT
 from services.cache import cached_portfolio
 from services.stock_services import get_prices, normalize_ticker, display_symbol
 
@@ -201,22 +202,21 @@ def _render(result):
 
     # Algorithm names are jargon to an investor -- keep the evidence available
     # for anyone who wants it, but never make the user read "PSO" to use the app.
-    if result.get("comparison"):
+    # When every strategy landed on the identical allocation, a scatter of 7
+    # coincident points and a bar chart of 7 equal bars show nothing -- worse,
+    # the 3D chart's per-point drop-lines become zero-length segments at a
+    # single coordinate, which can render as stray overlapping labels with no
+    # visible geometry. Skip both and say why in words instead.
+    if result.get("comparison") and not all_agree:
         _frontier_3d(result["comparison"])
 
         with st.expander("How this allocation was chosen (technical detail)"):
             ranked = sorted(result["comparison"].items(), key=lambda kv: kv[1]["sharpe"])
             best = ranked[-1][0]
-            if all_agree:
-                st.caption(
-                    f"All {len(comparison)} strategies below reached the same "
-                    "allocation — with this few holdings there is only one optimum "
-                    "to find, so there was nothing for them to disagree about.")
-            else:
-                st.caption(
-                    f"Every strategy below was run on your holdings. **{best}** scored the "
-                    "highest Sharpe ratio — return earned per unit of risk taken — so its "
-                    "allocation is the one shown above.")
+            st.caption(
+                f"Every strategy below was run on your holdings. **{best}** scored the "
+                "highest Sharpe ratio — return earned per unit of risk taken — so its "
+                "allocation is the one shown above.")
             fig = go.Figure(go.Bar(
                 y=[k for k, _ in ranked], x=[v["sharpe"] for _, v in ranked],
                 orientation="h",
@@ -228,6 +228,27 @@ def _render(result):
                               margin=dict(l=0, r=30, t=10, b=0),
                               xaxis_title="Sharpe", yaxis_title="Strategy")
             st.plotly_chart(fig, width="stretch")
+    elif result.get("comparison"):
+        with st.expander("How this allocation was chosen (technical detail)"):
+            capped = any(w >= MAX_WEIGHT - 1e-6 or w <= 1e-6
+                         for w in result["portfolio_weights"].values())
+            if capped:
+                st.caption(
+                    f"All {len(comparison)} strategies below reached the identical "
+                    f"allocation. Left alone, a max-Sharpe search always piles "
+                    f"everything into whichever stock looks best historically -- "
+                    f"the {MAX_WEIGHT:.0%} per-stock cap is what stops that, and "
+                    "with this few holdings it pins the same stocks to the same "
+                    "corner every time. That's the cap doing its job, not 7 "
+                    "algorithms coincidentally agreeing.")
+            else:
+                st.caption(
+                    f"All {len(comparison)} strategies below reached the same "
+                    "allocation — with this few holdings there is only one optimum "
+                    "to find, so there was nothing for them to disagree about.")
+            st.caption("Ran: " + ", ".join(sorted(comparison)) + ". The chart that "
+                       "normally compares them only adds information once there "
+                       "are enough holdings for the cap to stop deciding everything.")
 
     _council(result)
 
