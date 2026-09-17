@@ -75,6 +75,35 @@ def get_history(tickers, period="2y"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _download_intraday(symbols):
+    """Live-ish price via 1-minute bars. `_download`'s daily bars lag behind
+    the live tick during market hours -- Yahoo's "today" daily bar is often
+    still yesterday's completed close until the session ends."""
+    if not symbols:
+        return pd.DataFrame()
+    import yfinance as yf
+    try:
+        raw = yf.download(list(symbols), period="1d", interval="1m",
+                          auto_adjust=True, progress=False, threads=False)
+    except Exception as e:
+        logger.warning("intraday download failed %s: %s", symbols, e)
+        return pd.DataFrame()
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Close" not in raw.columns.get_level_values(0):
+            return pd.DataFrame()
+        close = raw["Close"]
+    else:
+        if "Close" not in raw.columns:
+            return pd.DataFrame()
+        close = raw[["Close"]]
+        close.columns = [symbols[0]]
+    return close.dropna(how="all")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _cached_closes():
     """Last night's closes from Firebase. Fallback only -- never raises."""
     try:
@@ -89,14 +118,25 @@ def _cached_closes():
 
 
 def get_prices(tickers):
-    """{ticker: last_close}. Missing tickers are absent; never raises."""
+    """{ticker: last price}. Live intraday tick first, falling back to the
+    last daily close and then the nightly cache as data goes missing.
+    Missing tickers are absent; never raises."""
     symbols = _key(tickers)
-    hist = get_history(symbols, period="5d")
     out = {}
-    for sym in hist.columns:
-        s = hist[sym].dropna()
+
+    intraday = _download_intraday(symbols)
+    for sym in intraday.columns:
+        s = intraday[sym].dropna()
         if not s.empty:
             out[sym] = float(s.iloc[-1])
+
+    missing = [s for s in symbols if s not in out]
+    if missing:
+        hist = get_history(missing, period="5d")
+        for sym in hist.columns:
+            s = hist[sym].dropna()
+            if not s.empty:
+                out[sym] = float(s.iloc[-1])
 
     # Degrade, never hang: if Yahoo is rate-limited or down, serve the nightly
     # close rather than a zero that would silently mis-weight the portfolio.
@@ -115,8 +155,12 @@ def get_prices(tickers):
 def prices_are_stale(tickers):
     """Which tickers could only be served from cache, and from what date."""
     symbols = _key(tickers)
-    hist = get_history(symbols, period="5d")
-    live = {s for s in hist.columns if not hist[s].dropna().empty}
+    intraday = _download_intraday(symbols)
+    live = {s for s in intraday.columns if not intraday[s].dropna().empty}
+    still_missing = [s for s in symbols if s not in live]
+    if still_missing:
+        hist = get_history(still_missing, period="5d")
+        live |= {s for s in hist.columns if not hist[s].dropna().empty}
     cached, day = _cached_closes()
     return sorted(s for s in symbols if s not in live and s in cached), day
 
