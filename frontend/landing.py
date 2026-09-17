@@ -144,8 +144,8 @@ def _hero():
 
 def _landing():
     st.title("Portfolio Management System")
-    st.caption("ML forecasting, nature-inspired optimization, and an agent council "
-               "that argues the allocation before you see it.")
+    st.caption("Rebalance your holdings for the best risk-adjusted return, with "
+               "an AI analyst council arguing the call before you see it.")
 
     _hero()
 
@@ -161,11 +161,11 @@ def _landing():
     st.divider()
     features = [
         (":material/tune:", "Smart optimization",
-         "Seven strategies compete on your holdings; the best risk-adjusted one wins."),
+         "Rebalance your holdings for the best risk-adjusted return."),
         (":material/groups:", "Analyst council",
-         "Four AI analysts pull live data, debate, and a chair resolves the call."),
+         "AI-driven market analysis behind every recommendation."),
         (":material/monitoring:", "Live NSE data",
-         "Batched quotes, news sentiment and full risk metrics on every position."),
+         "Live quotes, news sentiment and risk metrics on every position."),
     ]
     cols = st.columns(3)
     for col, (icon, title, body) in zip(cols, features):
@@ -174,8 +174,6 @@ def _landing():
                 st.markdown(f"### {icon}")
                 st.markdown(f"**{title}**")
                 st.caption(body)
-
-    st.caption("Staff access is at /?manager=1")
 
 
 def landing():

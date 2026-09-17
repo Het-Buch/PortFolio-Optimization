@@ -38,8 +38,6 @@ jobs:
             --trials "${{ github.event.inputs.trials || '40' }}"
         env:
           PYTHONUNBUFFERED: "1"
-          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
-          databaseURL: ${{ secrets.DATABASE_URL }}
 
       - uses: actions/upload-artifact@v4
         if: always()

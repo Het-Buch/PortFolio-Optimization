@@ -18,7 +18,9 @@ except Exception:
 
 # Bump when the wording changes -- an accepted plan records the version it was
 # accepted under, so consent is auditable rather than assumed.
-TERMS_VERSION = "1.0"
+TERMS_VERSION = "1.1"
+
+SOURCES = ("optimizer", "council")
 
 PENDING = "pending"
 CANCELLED = "cancelled"
@@ -31,9 +33,17 @@ def _plan_id():
     return f"{clock.year2()}r{int(n):07d}"
 
 
-def create_plan(user_id, orders, algorithm=""):
+def create_plan(user_id, orders, algorithm="", source="optimizer", audit=None):
     """Accept a plan. Supersedes any pending one -- two live plans for the same
-    portfolio would execute against each other."""
+    portfolio would execute against each other.
+
+    `audit` records what produced the orders (weights before/after the council,
+    each analyst's stance and reasons, both share targets) so any executed trade
+    can be traced to its inputs. Lists only: RTDB keys cannot contain ".", so
+    never key it by ticker.
+    """
+    if source not in SOURCES:
+        raise ValueError(f"unknown plan source: {source!r}")
     actionable = [o for o in (orders or []) if int(o.get("delta", 0) or 0) != 0]
     if not actionable:
         return None
@@ -51,6 +61,8 @@ def create_plan(user_id, orders, algorithm=""):
         "accepted_at": now,
         "terms_version": TERMS_VERSION,
         "algorithm": algorithm,
+        "source": source,
+        "audit": audit or {},
         "orders": [{
             "ticker": str(o.get("ticker", "")).strip().upper(),
             "company": o.get("company", ""),

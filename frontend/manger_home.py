@@ -58,8 +58,11 @@ def manager_home():
                 fig = go.Figure(go.Scatter(
                     x=series.index, y=series.values, mode="lines",
                     line=dict(color=ui.BLUE, width=2.5),
-                    fill="tozeroy", fillcolor=ui.rgba(ui.BLUE, 0.18)))
-                st.plotly_chart(ui.style_chart(fig, height=250), width="stretch")
+                    fill="tozeroy", fillcolor=ui.rgba(ui.BLUE, 0.18),
+                    hovertemplate="%{x|%d %b %Y}<br>%{y} total signups<extra></extra>"))
+                st.plotly_chart(ui.style_chart(fig, height=250,
+                                               title_x="Date", title_y="Total users"),
+                               width="stretch")
             else:
                 st.caption("No signup history yet.")
 
@@ -77,7 +80,8 @@ def manager_home():
                     text=[f"{v:,.0f}" for v in top.values],
                     textposition="outside", cliponaxis=False,
                     hovertemplate="<b>%{y}</b><br>%{x:,.0f} units held<extra></extra>"))
-                st.plotly_chart(ui.style_chart(fig, height=250, title_x="units"),
+                st.plotly_chart(ui.style_chart(fig, height=250, title_x="Units held",
+                                               title_y="Stock"),
                                width="stretch")
             else:
                 st.caption("No purchases yet.")

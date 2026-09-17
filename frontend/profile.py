@@ -72,7 +72,7 @@ def profile():
                 text=[f"₹{invested:,.0f}", f"₹{realised:,.0f}"],
                 textposition="outside", cliponaxis=False,
                 hovertemplate="<b>%{x}</b><br>₹%{y:,.2f}<extra></extra>"))
-            st.plotly_chart(ui.style_chart(fig, height=240), width="stretch")
+            st.plotly_chart(ui.style_chart(fig, height=240, title_y="₹"), width="stretch")
 
     for t in sorted(transactions, key=lambda x: str(x.get("timestamp", "")),
                     reverse=True):

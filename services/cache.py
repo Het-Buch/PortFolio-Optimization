@@ -33,6 +33,12 @@ def cached_transactions(user_id):
     return get_user_transactions(user_id)
 
 
+@st.cache_data(ttl=OWN_TTL, show_spinner=False)
+def cached_snapshots(user_id):
+    from database.curd import get_user_snapshots
+    return get_user_snapshots(user_id)
+
+
 @st.cache_data(ttl=TTL, show_spinner=False)
 def cached_stocks():
     from database.manager_operation import get_all_stocks_from_db

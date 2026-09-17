@@ -751,21 +751,5 @@ def main():
               f"{s['vs_baseline'].upper()} naive baseline ({s['baseline_rmse']:.5f}), "
               f"{s['improvement_pct']:+.2f}%")
 
-    # Lifts frontend/maintenance.py's app-wide gate. Best-effort: a machine
-    # running this offline with no Firebase creds should still get its CSVs.
-    try:
-        from database.connection import initialize_firebase
-        from database import clock
-        from firebase_admin import db
-        initialize_firebase()
-        db.reference("system/model_comparison").set({
-            "completed_at": clock.stamp(),
-            "targets": list(summary.keys()),
-        })
-        print("Recorded completion to Firebase -- app unlocked.")
-    except Exception as e:
-        print(f"Could not record completion to Firebase (app stays locked): {e}")
-
-
 if __name__ == "__main__":
     main()

@@ -108,17 +108,10 @@ def _render(result):
     comparison = result.get("comparison") or {}
     # With few holdings under a position cap there is only one feasible optimum,
     # so every strategy lands on it. Claiming we "kept the best" then is a lie
-    # dressed as rigour -- say plainly that they agreed.
+    # dressed as rigour -- say so, but only where the technical detail already
+    # lives (the expander below), not as unprompted noise above the numbers.
     sharpes = [round(v["sharpe"], 4) for v in comparison.values()]
     all_agree = len(sharpes) > 1 and len(set(sharpes)) == 1
-
-    if comparison and all_agree:
-        st.caption(f"All {len(comparison)} strategies reached the *same* allocation "
-                   "— with this few holdings there is only one optimum to find, "
-                   "so there was nothing for them to disagree about.")
-    elif comparison:
-        st.caption(f"Tested {len(comparison)} allocation strategies against "
-                   "2 years of price history and kept the best risk-adjusted result.")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Expected Return", f"{metrics['expected_return']:.2%}",
@@ -152,7 +145,8 @@ def _render(result):
                hovertemplate="<b>%{y}</b><br>Suggested %{x:.1f}%<extra></extra>")
     fig.update_layout(barmode="group", height=90 + 55 * len(names),
                       margin=dict(l=0, r=10, t=10, b=0),
-                      xaxis_title="Weight (%)", legend=dict(orientation="h", y=1.1))
+                      xaxis_title="Weight (%)", yaxis_title="Stock",
+                      legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig, width="stretch")
 
     for name, w in optimized.items():
@@ -187,8 +181,6 @@ def _render(result):
         if leftover:
             st.caption(f"Uninvested after whole-share rounding: ₹{leftover:,.2f}")
 
-        _schedule(orders, result)
-
     risk = result.get("risk_metrics") or {}
     if risk:
         st.subheader("Risk Profile")
@@ -215,10 +207,16 @@ def _render(result):
         with st.expander("How this allocation was chosen (technical detail)"):
             ranked = sorted(result["comparison"].items(), key=lambda kv: kv[1]["sharpe"])
             best = ranked[-1][0]
-            st.caption(
-                f"Every strategy below was run on your holdings. **{best}** scored the "
-                "highest Sharpe ratio — return earned per unit of risk taken — so its "
-                "allocation is the one shown above.")
+            if all_agree:
+                st.caption(
+                    f"All {len(comparison)} strategies below reached the same "
+                    "allocation — with this few holdings there is only one optimum "
+                    "to find, so there was nothing for them to disagree about.")
+            else:
+                st.caption(
+                    f"Every strategy below was run on your holdings. **{best}** scored the "
+                    "highest Sharpe ratio — return earned per unit of risk taken — so its "
+                    "allocation is the one shown above.")
             fig = go.Figure(go.Bar(
                 y=[k for k, _ in ranked], x=[v["sharpe"] for _, v in ranked],
                 orientation="h",
@@ -227,10 +225,87 @@ def _render(result):
                 text=[f"{v['sharpe']:.3f}" for _, v in ranked], textposition="outside",
             ))
             fig.update_layout(height=60 + 42 * len(ranked),
-                              margin=dict(l=0, r=30, t=10, b=0), xaxis_title="Sharpe")
+                              margin=dict(l=0, r=30, t=10, b=0),
+                              xaxis_title="Sharpe", yaxis_title="Strategy")
             st.plotly_chart(fig, width="stretch")
 
     _council(result)
+
+    # Below the council, not beside the optimizer output: the council can change
+    # what gets scheduled, and weights must still paint before any LLM call.
+    if orders:
+        _schedule(orders, leftover, result)
+
+
+def _basket_key(result):
+    """Identifies one optimizer result, so a council run never leaks onto another."""
+    return [list(result["tickers_ns"]),
+            [round(float(w), 6) for w in result["portfolio_weights"].values()]]
+
+
+def _council_orders(council, result):
+    """(orders, leftover) from the council's weights, or None if they fail the bound.
+
+    validate() already enforces the bound; this re-checks at the last step before
+    money moves, so a stale or tampered session value can never be scheduled.
+    """
+    from ml.council import MAX_POSITION, MAX_TILT
+
+    base = np.array(list(result["portfolio_weights"].values()), dtype=float)
+    try:
+        cw = np.array([float(council["weights"][t]) for t in result["tickers"]])
+    except (KeyError, TypeError, ValueError):
+        return None
+    cap_applies = MAX_POSITION * len(cw) >= 1.0 - 1e-9
+    if (len(cw) != len(base) or not np.isfinite(cw).all() or (cw < -1e-9).any()
+            or abs(cw.sum() - 1) > 1e-6 or (np.abs(cw - base) > MAX_TILT + 1e-6).any()
+            or (cap_applies and cw.max() > MAX_POSITION + 1e-6)):
+        return None
+    return rebalance_orders(dict(zip(result["tickers_ns"], cw.tolist())),
+                            st.session_state.get("holdings", {}),
+                            st.session_state.get("prices", {}))
+
+
+def _as_int(value):
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _audit(result, opt_orders, opt_left, council=None, council_plan=None):
+    """What produced a plan, stored with it. Lists only -- RTDB keys can't hold '.'."""
+    def targets(orders):
+        return [{"ticker": o["ticker"], "shares": int(o["target"])} for o in orders]
+
+    out = {
+        "optimizer_weights": [{"ticker": t, "weight": float(w)} for t, w in
+                              zip(result["tickers_ns"], result["portfolio_weights"].values())],
+        "optimizer_targets": targets(opt_orders),
+        "optimizer_cash_left": float(opt_left),
+    }
+    if council and council_plan:
+        from ml.council import MAX_POSITION, MAX_TILT
+        out.update({
+            "max_tilt": MAX_TILT,
+            "max_position": MAX_POSITION,
+            "council_weights": [{"ticker": ns, "weight": float(council["weights"][t])}
+                                for t, ns in zip(result["tickers"], result["tickers_ns"])],
+            "council_targets": targets(council_plan[0]),
+            "council_cash_left": float(council_plan[1]),
+            "debated_at": str(council.get("debated_at") or ""),
+            "stances": [{
+                "role": str(s.get("role", "")),
+                "stance": str(s.get("stance", "hold")),
+                "confidence": _as_int(s.get("confidence")),
+                "points": [str(p) for p in (s.get("points") or [])],
+                "tickers_of_concern": [str(x) for x in (s.get("tickers_of_concern") or [])],
+                "tools_used": [str(x) for x in (s.get("tools_used") or [])],
+            } for s in council.get("stances", [])],
+            "driven_by": [{"ticker": str(d["ticker"]), "roles": list(d.get("driven_by") or [])}
+                          for d in council.get("deltas", [])],
+        })
+    return out
 
 
 def _frontier_3d(comparison):
@@ -293,7 +368,7 @@ def _frontier_3d(comparison):
 TERMS = """
 ### Terms and Conditions — Scheduled Automatic Rebalancing
 
-**Version 1.0 · Please read in full before accepting.**
+**Version 1.1 · Please read in full before accepting.**
 
 By ticking the acceptance box below and selecting "Schedule rebalance", you
 ("the User") authorise the Portfolio Management System ("the Platform") to
@@ -381,8 +456,9 @@ must be made by you as a fresh transaction.
 **6. No advice**
 
 6.1. The allocation presented is the output of a numerical optimisation process
-and, where applicable, commentary generated by automated language models. It is
-provided for informational and educational purposes only.
+and, where you choose the council-adjusted allocation, an adjustment informed by
+automated language models (see 6.4 to 6.8). It is provided for informational
+and educational purposes only.
 
 6.2. Nothing on this page constitutes investment advice, a recommendation, a
 solicitation, or an offer to buy or sell any security. No assessment has been
@@ -392,6 +468,45 @@ suitability.
 6.3. You are solely responsible for evaluating the merits and risks of any
 allocation before accepting it, and should seek independent, professionally
 qualified advice where appropriate.
+
+6.4. **Council-adjusted allocation.** If you convene the analyst council and
+choose "Council-adjusted", the optimiser's allocation is adjusted using the
+positions taken by four automated analysts (language models reading market
+data and news). The analysts do not set any number. Their stated positions are
+converted into an adjustment by fixed, deterministic code, which enforces all of
+the following on every instruction:
+
+(a) no holding's target weight differs from the optimiser's target weight for
+that holding by more than **15 percentage points**, in either direction;
+
+(b) no holding exceeds **35%** of the portfolio, wherever that limit can be met
+for the number of holdings you own;
+
+(c) no weight is negative, and the weights always total 100%.
+
+These limits are checked again immediately before an instruction can be
+scheduled, and an adjustment that fails any of them cannot be scheduled. They
+are verified by automated tests over many thousands of randomly generated
+cases.
+
+6.5. **What the limits do not mean.** The limits restrict how far the council
+can move your allocation. They do not make the analysts' views correct. The
+adjustment **has not been shown to improve returns**, and may reduce them.
+Analysts rely on news and market data that may be incomplete, delayed,
+misattributed or wrong.
+
+6.6. Target weights are converted to whole shares and rounded down (see 4.3), so
+the shares actually scheduled may differ slightly from the percentages.
+
+6.7. For the same set of holdings, the council's analysis may be reused for up to
+15 minutes rather than repeated. The time the analysis was produced is shown
+with it.
+
+6.8. You may instead choose "Optimizer only", in which case no council
+adjustment is applied. Your choice is recorded with the instruction, together
+with the optimiser's weights, the adjusted weights where a council was
+convened, and each analyst's stated position and reasons, so that any executed
+order can be traced to the inputs that produced it.
 
 **7. Risk disclosure**
 
@@ -444,7 +559,7 @@ and the exact instruction accepted.
 
 
 @st.fragment
-def _schedule(orders, result):
+def _schedule(orders, leftover, result):
     """Accept-and-schedule, or show the pending plan with a way out."""
     from database import rebalance
 
@@ -455,7 +570,8 @@ def _schedule(orders, result):
     if pending:
         plan = pending[0]
         with st.container(border=True):
-            st.markdown(f"**Scheduled** · accepted {plan.get('accepted_at','')}")
+            basis = "Council-adjusted" if plan.get("source") == "council" else "Optimizer only"
+            st.markdown(f"**Scheduled** · {basis} · accepted {plan.get('accepted_at','')}")
             st.caption("Executes after the next NSE close. Cancel any time "
                        "before then.")
             for o in plan.get("orders", []):
@@ -468,15 +584,53 @@ def _schedule(orders, result):
             if st.button("Cancel scheduled rebalance", icon=":material/close:"):
                 if rebalance.cancel(plan.get("plan_id"), user_id):
                     st.toast("Rebalance cancelled")
-                    st.rerun(scope="fragment")
+                    st.rerun()
                 else:
                     st.error("Could not cancel — it may have already executed.")
         return
 
-    actionable = [o for o in orders if o.get("delta")]
+    council = st.session_state.get("council")
+    if council and council.get("key") != _basket_key(result):
+        council = None
+    council_plan = _council_orders(council, result) if council else None
+
+    source, chosen = "optimizer", orders
+    if council and council_plan is None:
+        st.warning("The council's adjusted weights failed the safety check, so only "
+                   "the optimizer's allocation can be scheduled.", icon=":material/gpp_bad:")
+    elif council_plan:
+        # Optimizer first: the council's adjustment has no track record yet, so
+        # it is something a user opts into, never the default.
+        pick = st.radio("Allocation to schedule", ["Optimizer only", "Council-adjusted"],
+                        horizontal=True,
+                        help="Council-adjusted moves each stock at most 15 percentage "
+                             "points from the optimizer's weight. See section 6 of the terms.")
+        if pick == "Council-adjusted":
+            source, chosen = "council", council_plan[0]
+    else:
+        st.caption("Scheduling the optimizer's allocation. Convene the council above "
+                   "to schedule its adjusted allocation instead.")
+
+    actionable = [o for o in chosen if o.get("delta")]
     if not actionable:
         st.caption("Nothing to schedule — your portfolio already matches the target.")
         return
+
+    # The optimizer's orders are listed above; the council's differ, so show them.
+    if source == "council":
+        by_optimizer = {o["ticker"]: o for o in orders}
+        for o in chosen:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([3, 2.4, 1])
+                c1.markdown(f"**{o['company']}**")
+                alone = by_optimizer.get(o["ticker"], {}).get("target", o["held"])
+                c1.caption(f"Optimizer alone: {alone} sh  ·  council: {o['target']} sh")
+                c2.html(ui.flow(f"{o['held']} sh", f"{o['target']} sh",
+                                {"BUY": "good", "SELL": "bad"}.get(o["action"], "neutral"),
+                                width=104))
+                c3.html(_pill(o["action"]))
+        if council_plan[1]:
+            st.caption(f"Uninvested after whole-share rounding: ₹{council_plan[1]:,.2f}")
 
     # Fixed height: the terms scroll inside their own box instead of pushing the
     # acceptance control off-screen.
@@ -484,76 +638,116 @@ def _schedule(orders, result):
         st.markdown(TERMS)
 
     with st.container(border=True):
+        label = ("the council-adjusted allocation" if source == "council"
+                 else "the optimizer's allocation")
         st.caption(f"Terms version {rebalance.TERMS_VERSION} · "
-                   f"{len(actionable)} order(s) will execute automatically.")
+                   f"{len(actionable)} order(s) from {label} will execute automatically.")
+        # Keyed per source: consent given for one allocation must not carry over
+        # when the user switches to the other.
         agreed = st.checkbox("I have read and accept the Terms and Conditions "
-                             "above, and authorise automatic execution.")
+                             "above, and authorise automatic execution.",
+                             key=f"terms_ok_{source}")
         if st.button("Schedule rebalance", type="primary", disabled=not agreed,
                      icon=":material/event_available:"):
             plan_id = rebalance.create_plan(
                 user_id, actionable,
-                algorithm=(result.get("portfolio_metrics") or {}).get("algorithm", ""))
+                algorithm=(result.get("portfolio_metrics") or {}).get("algorithm", ""),
+                source=source,
+                audit=_audit(result, orders, leftover, council, council_plan))
             if plan_id:
                 st.toast("Rebalance scheduled for the next trading day")
-                st.rerun(scope="fragment")
+                st.rerun()
             else:
                 st.error("Nothing to schedule.")
 
 
 @st.fragment
 def _council(result):
-    """Fragment: rerunning the council must not re-run the optimizer above it."""
+    """Fragment: rerunning the council must not re-run the optimizer above it.
+
+    The result is kept in session state, keyed to this optimizer run, because
+    the schedule section below uses the council's weights.
+    """
     st.subheader("Council Analysis")
+    st.caption("Four AI analysts review your holdings with live data. If you convene "
+               "them, the rebalance below can use their adjusted allocation — each "
+               "stock moves at most 15 percentage points from the optimizer's weight.")
 
-    if st.button("Convene council"):
-        from ml.council import analyze, chair_stream
+    key = _basket_key(result)
+    saved = st.session_state.get("council")
+    if saved and saved.get("key") != key:
+        st.session_state.pop("council", None)
+        saved = None
 
-        tickers = result["tickers"]
-        base = np.array(list(result["portfolio_weights"].values()))
+    if not st.button("Convene again" if saved else "Convene council"):
+        if saved:
+            _council_view(saved)
+            st.subheader("Chair's Synthesis")
+            st.markdown(saved.get("chair") or "_The Chair's summary was unavailable._")
+        return
 
-        try:
-            with st.spinner("Four analysts are pulling live data..."):
-                analysis = analyze(tickers, base)
-        except Exception as e:
-            st.error(f"Council unavailable: {e}")
-            st.caption("Weights above are unaffected — they come from the optimizer.")
-            return
+    from ml.council import analyze, chair_stream
 
-        stance_kind = {"increase": "good", "decrease": "bad"}
-        cols = st.columns(len(analysis["stances"]))
-        for col, s in zip(cols, analysis["stances"]):
-            with col:
-                with st.container(border=True):
-                    st.markdown(f"**{s['role'].title()}**")
-                    st.html(ui.pill(s["stance"].upper(), stance_kind.get(s["stance"], "neutral")))
-                    st.caption(f"{s['confidence']}% confidence")
-                    with st.expander("Reasoning"):
-                        for point in s.get("points") or []:
-                            st.write(f"- {point}")
-                        if s.get("tools_used"):
-                            st.caption(f"Tools called: {', '.join(s['tools_used'])}")
+    try:
+        with st.spinner("Four analysts are pulling live data..."):
+            analysis = analyze(result["tickers"],
+                               np.array(list(result["portfolio_weights"].values())))
+    except Exception:
+        st.error("The council couldn't be reached right now. Try again in a minute.")
+        st.caption("Weights above are unaffected — they come from the optimizer.")
+        return
 
-        if analysis["unanimous_no_effect"]:
-            st.info("All four analysts leaned the same direction, so the "
-                    "allocation is unchanged relative to itself — weights are "
-                    "relative, and a portfolio-wide tilt has nothing to move "
-                    "against. See each analyst's reasoning above.")
-        elif analysis["disagreement"]:
-            st.caption("Analysts disagreed — the Chair below explains how it "
-                      "was resolved.")
+    stances = analysis["stances"]
+    saved = {"key": key, **{k: v for k, v in analysis.items() if k != "_client"},
+             "debated_at": stances[0].get("debated_at", "") if stances else ""}
+    st.session_state["council"] = saved
+    _council_view(saved)
 
-        st.subheader("Weight Changes")
-        for d in analysis["deltas"]:
-            c1, c2, c3, c4 = st.columns([2, 2, 1.2, 2])
-            c1.write(d["ticker"])
-            c2.write(f"{d['optimizer']:.1%} → {d['council']:.1%}")
-            color = GOOD if d["change"] > 0 else BAD if d["change"] < 0 else NEUTRAL
-            c3.html(f'<span style="color:{color};font-weight:600">'
-                   f'{d["change"]:+.1%}</span>')
-            c4.caption(", ".join(d["driven_by"]) or "no tilt")
+    st.subheader("Chair's Synthesis")
+    try:
+        saved["chair"] = st.write_stream(chair_stream(analysis))
+    except Exception:
+        st.caption("The Chair's summary was unavailable. The adjusted weights above still apply.")
+    # Full rerun so the schedule section, a separate fragment, sees these weights.
+    st.rerun()
 
-        st.subheader("Chair's Synthesis")
-        st.write_stream(chair_stream(analysis))
+
+def _council_view(council):
+    if council.get("debated_at"):
+        st.caption(f":material/schedule: Debated at {council['debated_at']} IST — the "
+                   "same holdings reuse this debate for 15 minutes.")
+
+    stance_kind = {"increase": "good", "decrease": "bad"}
+    stances = council.get("stances") or []
+    cols = st.columns(max(len(stances), 1))
+    for col, s in zip(cols, stances):
+        with col:
+            with st.container(border=True):
+                st.markdown(f"**{s['role'].title()}**")
+                st.html(ui.pill(s["stance"].upper(), stance_kind.get(s["stance"], "neutral")))
+                st.caption(f"{s['confidence']}% confidence")
+                with st.expander("Reasoning"):
+                    for point in s.get("points") or []:
+                        st.write(f"- {point}")
+                    if s.get("tools_used"):
+                        st.caption(f"Data used: {', '.join(s['tools_used'])}")
+
+    if council.get("unanimous_no_effect"):
+        st.info("All four analysts leaned the same direction, so the allocation is "
+                "unchanged — weights are relative, and a portfolio-wide lean has "
+                "nothing to move against. See each analyst's reasoning above.")
+    elif council.get("disagreement"):
+        st.caption("Analysts disagreed — the Chair below explains how it was resolved.")
+
+    st.subheader("Weight Changes")
+    st.caption("Optimizer → council. Each change is capped at 15 percentage points.")
+    for d in council.get("deltas") or []:
+        c1, c2, c3, c4 = st.columns([2, 2, 1.2, 2])
+        c1.write(d["ticker"])
+        c2.write(f"{d['optimizer']:.1%} → {d['council']:.1%}")
+        color = GOOD if d["change"] > 1e-9 else BAD if d["change"] < -1e-9 else NEUTRAL
+        c3.html(f'<span style="color:{color};font-weight:600">{d["change"]:+.1%}</span>')
+        c4.caption(", ".join(d["driven_by"]) or "no change requested")
 
 
 if __name__ == "__main__":

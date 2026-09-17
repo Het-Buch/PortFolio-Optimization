@@ -264,7 +264,7 @@ def label(text):
     st.html(f'<div class="sec-label">{text}</div>')
 
 
-def style_chart(fig, height=300, legend=False, title_x=None):
+def style_chart(fig, height=300, legend=False, title_x=None, title_y=None):
     """One chart look everywhere: no chartjunk, tight margins, subtle grid."""
     fig.update_layout(
         height=height,
@@ -272,6 +272,7 @@ def style_chart(fig, height=300, legend=False, title_x=None):
         showlegend=legend,
         legend=dict(orientation="h", y=-0.12, x=0),
         xaxis_title=title_x,
+        yaxis_title=title_y,
         font=dict(size=12),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",

@@ -10,6 +10,7 @@ import numpy as np
 import streamlit as st
 
 from ml import optimizers, tools
+from database import clock
 from database.connection import _setting  # loads every .env explicitly
 log = logging.getLogger(__name__)
 
@@ -212,7 +213,12 @@ def _parse_stance(text):
 
 
 def validate(base_weights, tilts, tickers):
-    """Deterministic gate. The council proposes; this decides. Never an LLM."""
+    """Deterministic gate. The council proposes; this decides. Never an LLM.
+
+    Guarantee: every final weight is within MAX_TILT of the optimizer's weight,
+    the weights sum to 1, none is negative, and none exceeds MAX_POSITION
+    (unless the cap is infeasible for this many holdings). _self_check proves it.
+    """
     w = np.asarray(base_weights, dtype=float).copy()
     t = np.asarray(tilts, dtype=float)
 
@@ -222,17 +228,41 @@ def validate(base_weights, tilts, tickers):
     if not w.any():
         w = np.full(len(w), 1.0 / max(len(w), 1))
 
-    w = w + np.clip(t, -MAX_TILT, MAX_TILT)      # bound how far the council can move it
+    base = optimizers._repair(w, cap=MAX_POSITION)[0]
+    return {t_: float(x) for t_, x in zip(tickers, _bounded(base, t))}
 
-    # Reuse the optimizer's projection rather than repeating it. Two versions of
-    # "clip to a cap and renormalize" is how this drifted: the copy here lacked
-    # the infeasible-cap guard, so a 2-stock portfolio under a 35% cap always
-    # came out 50/50, discarding the optimizer's weights and the council's view
-    # alike. It also converges properly instead of leaving float residue above
-    # the cap.
-    w = optimizers._repair(w, cap=MAX_POSITION)[0]
 
-    return {t_: float(x) for t_, x in zip(tickers, w)}
+def _bounded(base, tilt, band=MAX_TILT, cap=MAX_POSITION):
+    """Allocation nearest base+tilt with sum 1 and every weight in its band.
+
+    Tilting then renormalizing let one stock move 30 points when the others
+    were cut, so the band is a hard box around `base`, solved exactly: find
+    the shift s where f(s) = sum(clip(base + tilt - s, lo, hi)) == 1. f is
+    piecewise linear and non-increasing, with kinks only at target-hi and
+    target-lo, and `base` lies inside the box, so the root sits on one linear
+    segment between two kinks. Anything unexpected falls back to `base`.
+    """
+    n = len(base)
+    if n == 0:
+        return base
+    if cap * n < 1.0 - 1e-9:  # same infeasibility rule as optimizers._repair
+        cap = 1.0
+    lo = np.minimum(np.maximum(base - band, 0.0), base)
+    hi = np.maximum(np.minimum(base + band, cap), base)
+    target = base + np.clip(tilt, -band, band)
+
+    kinks = np.sort(np.concatenate([target - hi, target - lo]))
+    f = np.clip(target[None, :] - kinks[:, None], lo, hi).sum(axis=1)
+    k = min(int(np.searchsorted(-f, -1.0, side="right")) - 1, len(kinks) - 2)
+    k = max(k, 0)
+    f0, f1 = f[k], f[k + 1]
+    s = kinks[k] if f0 == f1 else kinks[k] + (f0 - 1.0) / (f0 - f1) * (kinks[k + 1] - kinks[k])
+    w = np.clip(target - s, lo, hi)
+    w = w / w.sum() if w.sum() > 0 else base
+
+    ok = (np.isfinite(w).all() and abs(w.sum() - 1) < 1e-9
+          and (np.abs(w - base) <= band + 1e-9).all() and (w >= -1e-12).all())
+    return np.clip(w, 0.0, None) if ok else base
 
 
 def _tilts(stances, tickers):
@@ -273,16 +303,21 @@ def _stances_for(tickers):
     """
     client = _client()
     line = ", ".join(tickers)
+    # Frozen at the moment this cache entry is computed -- unchanged on a cache
+    # hit, so the UI can show it and prove whether the debate actually re-ran.
+    debated_at = clock.stamp()
 
     # Analysts are independent within a round -- run them together, not in sequence.
     def safe(role):
         try:
-            return _run_agent(role, line, client)
+            return {**_run_agent(role, line, client), "debated_at": debated_at}
         except Exception as e:
             log.warning("%s agent failed: %s", role, e)
-            return {"role": role, "text": f"(unavailable: {e})", "tools_used": [],
-                    "model": "", "stance": "hold", "confidence": 0,
-                    "points": [], "tickers_of_concern": []}
+            return {"role": role, "text": "This analyst could not reach the "
+                    "market-data provider and was skipped this round.",
+                    "tools_used": [], "model": "", "stance": "hold",
+                    "confidence": 0, "points": [], "tickers_of_concern": [],
+                    "debated_at": debated_at}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         return list(pool.map(safe, ROLES))
@@ -431,7 +466,30 @@ def _self_check():
     assert abs(sum(two.values()) - 1) < 1e-9, two
     assert abs(two["A"] - 0.8) < 1e-9, f"infeasible cap flattened the weights: {two}"
 
-    print("council: OK")
+    # The guarantee the terms quote. Random optimizer weights, random tilts far
+    # beyond the band (and some NaN/inf), 2-8 holdings: no weight may ever move
+    # more than MAX_TILT from the optimizer's.
+    rng = np.random.default_rng(7)
+    worst, cases = 0.0, 0
+    for n in range(2, 9):
+        names = [f"T{i}" for i in range(n)]
+        feasible_cap = MAX_POSITION * n >= 1.0 - 1e-9
+        for _ in range(2000):
+            b = optimizers._repair(rng.dirichlet(np.ones(n) * rng.uniform(0.2, 3)),
+                                   cap=MAX_POSITION)[0]
+            t = rng.uniform(-1.0, 1.0, n) * rng.choice([0.1, 0.5, 1.0, 5.0])
+            if rng.random() < 0.05:
+                t[rng.integers(n)] = rng.choice([np.nan, np.inf, -np.inf])
+            w = np.array([validate(b, t, names)[k] for k in names])
+            move = float(np.abs(w - b).max())
+            worst, cases = max(worst, move), cases + 1
+            assert move <= MAX_TILT + 1e-9, (n, b, t, w, move)
+            assert abs(w.sum() - 1) < 1e-9 and (w >= 0).all(), (b, t, w)
+            if feasible_cap:
+                assert w.max() <= MAX_POSITION + 1e-9, (b, t, w)
+
+    print(f"council: OK ({cases} randomized cases, worst move {worst:.4f} "
+          f"<= {MAX_TILT})")
 
 
 if __name__ == "__main__":

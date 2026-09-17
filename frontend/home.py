@@ -1,6 +1,7 @@
 import plotly.graph_objects as go
 import streamlit as st
-from services.cache import cached_user, cached_portfolio, cached_transactions
+from services.cache import (cached_user, cached_portfolio, cached_transactions,
+                            cached_snapshots)
 from services.stock_services import get_prices, display_symbol
 from database.curd import sell_stock
 
@@ -27,8 +28,11 @@ def _pending_rebalance_notice(user_id):
     with st.container(border=True):
         c1, c2 = st.columns([4, 1])
         c1.markdown("**:material/event_repeat: Rebalance scheduled**")
-        c1.caption(f"{buys} buy / {sells} sell order(s) execute automatically "
-                   "after the next market close. Cancel any time before then.")
+        basis = ("council-adjusted allocation" if plan.get("source") == "council"
+                 else "optimizer's allocation")
+        c1.caption(f"{buys} buy / {sells} sell order(s) from the {basis} execute "
+                   "automatically after the next market close. Cancel any time "
+                   "before then.")
         if c2.button("Review", width="stretch", icon=":material/tune:"):
             st.session_state["page"] = "optimize"
             st.rerun()
@@ -180,6 +184,25 @@ def home():
         with st.container(border=True):
             st.metric("Holdings", len(stock_data))
 
+    snaps = cached_snapshots(user_id)
+    if len(snaps) >= 2:
+        st.markdown("##### :material/show_chart: Value over time")
+        with st.container(border=True):
+            dates = [s["date"] for s in snaps]
+            values = [float(s.get("value", 0) or 0) for s in snaps]
+            up = values[-1] >= values[0]
+            color = ui.GREEN if up else ui.RED
+            fig = go.Figure(go.Scatter(
+                x=dates, y=values, mode="lines", line=dict(color=color, width=2.5),
+                fill="tozeroy", fillcolor=ui.rgba(color, 0.15),
+                hovertemplate="%{x}<br>₹%{y:,.2f}<extra></extra>"))
+            st.plotly_chart(ui.style_chart(fig, height=260, title_x="Date",
+                                           title_y="Portfolio value (₹)"),
+                           width="stretch")
+    elif not snaps:
+        st.caption(":material/info: Value history starts building after tonight's "
+                   "close — check back tomorrow to see it trend.")
+
     left, right = st.columns([1, 1])
     with left:
         st.markdown("##### :material/donut_large: Allocation")
@@ -205,7 +228,8 @@ def home():
                 cliponaxis=False,
                 hovertemplate="<b>%{y}</b><br>Gain / loss ₹%{x:,.2f}<extra></extra>",
             ))
-            st.plotly_chart(ui.style_chart(fig, title_x="₹ gain / loss"),
+            st.plotly_chart(ui.style_chart(fig, title_x="₹ gain / loss",
+                                           title_y="Stock"),
                            width="stretch")
 
     ui.label("Your holdings")

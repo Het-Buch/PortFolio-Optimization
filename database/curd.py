@@ -745,6 +745,20 @@ def get_user_transactions(user_id):
         return []
 
 
+def get_user_snapshots(user_id):
+    """Daily portfolio value written by the nightly job -- `snapshots/{uid}/{day}`
+    is already scoped to this user, so no full-table scan or index is needed."""
+    try:
+        rows = db.reference(f"snapshots/{user_id}").get() or {}
+        return sorted(
+            ({"date": day, **v} for day, v in rows.items() if v),
+            key=lambda r: r["date"],
+        )
+    except Exception as e:
+        print(f"Error fetching snapshots: {e}")
+        return []
+
+
 if __name__ == "__main__":
 
     get_user_details()
